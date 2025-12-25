@@ -69,14 +69,14 @@ DATA_DIR = "data"
 OUTPUT_DIR = "output/adapters"
 
 # Training hyperparameters (matching original MLX config)
-MAX_STEPS = 1200  # Equivalent to ITERS in MLX
+MAX_STEPS = 150  # Reduced for larger batch size (same total samples as 1200 steps with batch=2)
 BATCH_SIZE = 16  # A100 can handle much more
 LEARNING_RATE = 5e-6
 GRADIENT_ACCUMULATION_STEPS = 1  # Effective batch size = 2 GPUs * 16 batch * 1 = 32
-WARMUP_STEPS = 50
-LOGGING_STEPS = 10
-EVAL_STEPS = 50  # More frequent evaluation (was STEPS_PER_EVAL)
-SAVE_STEPS = 100  # More frequent checkpoints (was SAVE_EVERY)
+WARMUP_STEPS = 10
+LOGGING_STEPS = 5
+EVAL_STEPS = 25
+SAVE_STEPS = 50
 MAX_SEQ_LENGTH = 2048
 
 # LoRA Configuration
