@@ -5,6 +5,8 @@ Converts training.txt into data/train.jsonl in ChatML format.
 Optimized for conversational roleplay, not podcast-style monologues.
 """
 
+from __future__ import annotations
+
 import json
 import os
 import re
