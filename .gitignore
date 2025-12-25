@@ -1,0 +1,21 @@
+# Python
+__pycache__/
+*.py[cod]
+venv/
+.venv/
+
+# Training outputs
+output/
+*.pt
+*.bin
+*.safetensors
+
+# HuggingFace cache
+hf_cache/
+
+# OS
+.DS_Store
+
+# IDE
+.vscode/
+.idea/
