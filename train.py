@@ -68,21 +68,21 @@ MODEL = "mistralai/Mistral-7B-Instruct-v0.3"
 DATA_DIR = "data"
 OUTPUT_DIR = "output/adapters"
 
-# Training hyperparameters (matching original MLX config)
-MAX_STEPS = 150  # Reduced for larger batch size (same total samples as 1200 steps with batch=2)
-BATCH_SIZE = 16  # A100 can handle much more
-LEARNING_RATE = 5e-6
-GRADIENT_ACCUMULATION_STEPS = 1  # Effective batch size = 2 GPUs * 16 batch * 1 = 32
-WARMUP_STEPS = 10
-LOGGING_STEPS = 5
-EVAL_STEPS = 25
-SAVE_STEPS = 50
+# Training hyperparameters
+MAX_STEPS = 300  # More steps to learn refusal behavior
+BATCH_SIZE = 8  # Smaller batch for better quality
+LEARNING_RATE = 1e-5  # Slightly higher LR for stronger adaptation
+GRADIENT_ACCUMULATION_STEPS = 2  # Effective batch size = 2 GPUs * 8 batch * 2 = 32
+WARMUP_STEPS = 20
+LOGGING_STEPS = 10
+EVAL_STEPS = 50
+SAVE_STEPS = 100
 MAX_SEQ_LENGTH = 2048
 
 # LoRA Configuration
-LORA_R = 8  # rank
-LORA_ALPHA = 16  # scale factor
-LORA_DROPOUT = 0.0
+LORA_R = 32  # rank (increased for better personality learning)
+LORA_ALPHA = 64  # scale factor (increased for stronger adaptation)
+LORA_DROPOUT = 0.05  # small dropout for regularization
 
 # Target modules for Mistral architecture
 LORA_TARGET_MODULES = [
