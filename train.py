@@ -69,10 +69,10 @@ DATA_DIR = "data"
 OUTPUT_DIR = "output/adapters"
 
 # Training hyperparameters
-MAX_STEPS = 300  # More steps to learn refusal behavior
-BATCH_SIZE = 8  # Smaller batch for better quality
-LEARNING_RATE = 1e-5  # Slightly higher LR for stronger adaptation
-GRADIENT_ACCUMULATION_STEPS = 2  # Effective batch size = 2 GPUs * 8 batch * 2 = 32
+MAX_STEPS = 300
+BATCH_SIZE = 4  # A100 40GB can handle this with 7B model
+LEARNING_RATE = 1e-5
+GRADIENT_ACCUMULATION_STEPS = 4  # Effective batch size = 4 * 4 = 16
 WARMUP_STEPS = 20
 LOGGING_STEPS = 10
 EVAL_STEPS = 50
@@ -176,10 +176,7 @@ def train():
     if not check_data():
         sys.exit(1)
 
-    gpu_count = torch.cuda.device_count()
-    print(f"\nGPUs available: {gpu_count}")
-    for i in range(gpu_count):
-        print(f"  GPU {i}: {torch.cuda.get_device_name(i)}")
+    print(f"\nGPU: {torch.cuda.get_device_name(0)}")
     print(f"Model: {MODEL}")
     print(f"Data: {DATA_DIR}")
     print(f"Output: {OUTPUT_DIR}")
@@ -209,8 +206,9 @@ def train():
     model = AutoModelForCausalLM.from_pretrained(
         MODEL,
         torch_dtype=torch.float16,
+        device_map="auto",
         trust_remote_code=True,
-        attn_implementation="sdpa",  # More memory efficient attention
+        attn_implementation="sdpa",
     )
 
     # Enable gradient checkpointing to save memory
@@ -250,9 +248,8 @@ def train():
         report_to="none",  # Disable wandb/tensorboard
         remove_unused_columns=False,
         dataloader_pin_memory=True,
-        dataloader_num_workers=4,  # Parallel data loading
-        gradient_checkpointing=True,  # Save memory
-        gradient_checkpointing_kwargs={"use_reentrant": False},  # Required for DDP
+        dataloader_num_workers=2,
+        gradient_checkpointing=True,
     )
 
     # Data collator
