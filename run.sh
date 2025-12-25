@@ -16,7 +16,7 @@ if [ ! -d "venv" ]; then
     echo "[2/4] Installing dependencies..."
     pip install --upgrade pip
     pip install torch --index-url https://download.pytorch.org/whl/cu121
-    pip install transformers datasets peft accelerate
+    pip install transformers datasets peft accelerate sentencepiece protobuf
 else
     echo "[1/4] Virtual environment exists, activating..."
     source venv/bin/activate
