@@ -70,9 +70,9 @@ OUTPUT_DIR = "output/adapters"
 
 # Training hyperparameters (matching original MLX config)
 MAX_STEPS = 1200  # Equivalent to ITERS in MLX
-BATCH_SIZE = 2  # Reduced for memory; use gradient accumulation to compensate
+BATCH_SIZE = 16  # A100 can handle much more
 LEARNING_RATE = 5e-6
-GRADIENT_ACCUMULATION_STEPS = 1  # Effective batch size = 2 GPUs * 2 batch * 1 = 4
+GRADIENT_ACCUMULATION_STEPS = 1  # Effective batch size = 2 GPUs * 16 batch * 1 = 32
 WARMUP_STEPS = 50
 LOGGING_STEPS = 10
 EVAL_STEPS = 50  # More frequent evaluation (was STEPS_PER_EVAL)
@@ -250,6 +250,7 @@ def train():
         report_to="none",  # Disable wandb/tensorboard
         remove_unused_columns=False,
         dataloader_pin_memory=True,
+        dataloader_num_workers=4,  # Parallel data loading
         gradient_checkpointing=True,  # Save memory
         gradient_checkpointing_kwargs={"use_reentrant": False},  # Required for DDP
     )
