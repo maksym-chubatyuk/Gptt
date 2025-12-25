@@ -251,6 +251,7 @@ def train():
         remove_unused_columns=False,
         dataloader_pin_memory=True,
         gradient_checkpointing=True,  # Save memory
+        gradient_checkpointing_kwargs={"use_reentrant": False},  # Required for DDP
     )
 
     # Data collator
