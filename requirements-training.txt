@@ -1,3 +1,6 @@
+# Requirements for preprocess.py and train.py
+# Install with: pip install -r requirements-training.txt
+
 # PyTorch with CUDA support
 # Install with: pip install torch --index-url https://download.pytorch.org/whl/cu121
 torch>=2.1.0
@@ -6,9 +9,6 @@ torch>=2.1.0
 transformers>=4.36.0
 accelerate>=0.25.0
 peft>=0.7.0
-
-# Quantization for efficient inference/training (QLoRA)
-bitsandbytes>=0.41.0
 
 # Data handling
 datasets>=2.16.0
