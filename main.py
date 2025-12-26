@@ -285,10 +285,17 @@ class VisionServer:
         """Start the vision server subprocess."""
         import subprocess
 
-        # Python script that runs as server
+        # Python script that runs as server - uses stdin/stdout for IPC
         server_code = '''
-import sys, os, json
-sys.stdout = sys.stderr = open(os.devnull, "w")
+import sys, os
+
+# Redirect stderr to devnull to suppress debug
+sys.stderr = open(os.devnull, "w")
+
+# Save stdout for IPC, then redirect to devnull during model load
+real_stdout = os.fdopen(os.dup(sys.stdout.fileno()), "w")
+sys.stdout = open(os.devnull, "w")
+
 from llama_cpp import Llama
 from llama_cpp.llama_chat_format import Llava15ChatHandler
 
@@ -299,23 +306,14 @@ handler = Llava15ChatHandler(clip_model_path=clip_path, verbose=False)
 model = Llama(model_path=model_path, chat_handler=handler, n_gpu_layers=-1, n_ctx=2048, verbose=False)
 
 # Signal ready
-os.write(3, b"READY\\n")
+real_stdout.write("READY\\n")
+real_stdout.flush()
 
-# Process requests from fd 4
-req_fd = 4
-resp_fd = 3
-
-while True:
-    data = b""
-    while not data.endswith(b"\\n"):
-        chunk = os.read(req_fd, 4096)
-        if not chunk:
-            sys.exit(0)
-        data += chunk
-
-    image_uri = data.decode().strip()
+# Process requests from stdin
+for line in sys.stdin:
+    image_uri = line.strip()
     if image_uri == "QUIT":
-        sys.exit(0)
+        break
 
     try:
         response = model.create_chat_completion(
@@ -326,58 +324,46 @@ while True:
             max_tokens=100,
             temperature=0.1,
         )
-        result = response["choices"][0]["message"]["content"]
+        result = response["choices"][0]["message"]["content"].replace("\\n", " ")
     except Exception as e:
         result = f"Vision error: {e}"
 
-    os.write(resp_fd, (result + "\\n__END__\\n").encode())
+    real_stdout.write(result + "\\n")
+    real_stdout.flush()
 '''
-
-        # Create pipes for communication
-        req_read, req_write = os.pipe()
-        resp_read, resp_write = os.pipe()
 
         self.process = subprocess.Popen(
             [sys.executable, "-c", server_code, self.model_path, self.clip_path],
-            stdin=subprocess.DEVNULL,
-            stdout=subprocess.DEVNULL,
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
             stderr=subprocess.DEVNULL,
-            pass_fds=(resp_write, req_read),
+            text=True,
+            bufsize=1,
         )
 
-        os.close(req_read)
-        os.close(resp_write)
-        self.req_fd = req_write
-        self.resp_fd = resp_read
-
         # Wait for ready signal
-        ready = b""
-        while b"READY" not in ready:
-            ready += os.read(self.resp_fd, 100)
+        ready = self.process.stdout.readline()
+        if "READY" not in ready:
+            raise RuntimeError(f"Vision server failed to start: {ready}")
 
     def describe(self, image_data_uri: str) -> str:
         """Get vision description."""
         if not self.process:
             return "Vision server not running"
 
-        os.write(self.req_fd, (image_data_uri + "\n").encode())
-
-        response = b""
-        while b"__END__" not in response:
-            response += os.read(self.resp_fd, 4096)
-
-        return response.decode().replace("__END__", "").strip()
+        self.process.stdin.write(image_data_uri + "\n")
+        self.process.stdin.flush()
+        return self.process.stdout.readline().strip()
 
     def stop(self):
         """Stop the vision server."""
         if self.process:
             try:
-                os.write(self.req_fd, b"QUIT\n")
+                self.process.stdin.write("QUIT\n")
+                self.process.stdin.flush()
                 self.process.wait(timeout=5)
             except:
                 self.process.kill()
-            os.close(self.req_fd)
-            os.close(self.resp_fd)
 
 
 _vision_server = None
