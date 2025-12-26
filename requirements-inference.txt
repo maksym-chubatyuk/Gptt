@@ -1,5 +1,7 @@
-# Requirements for main.py and main_4_bit.py (running the model)
+# Requirements for inference scripts
 # Install with: pip install -r requirements-inference.txt
+
+# ==== For main.py and main_4_bit.py (transformers-based) ====
 
 # PyTorch with CUDA support
 # Install with: pip install torch --index-url https://download.pytorch.org/whl/cu121
@@ -22,3 +24,19 @@ safetensors>=0.4.0
 # Tokenizer dependencies
 sentencepiece>=0.1.99
 protobuf>=4.21.0
+
+
+# ==== For main_vision.py (GGUF-based with camera) ====
+
+# Camera capture
+opencv-python>=4.8.0
+
+# Image processing
+Pillow>=10.0.0
+
+# llama-cpp-python with CUDA support for GGUF inference
+# Install with CUDA:
+#   CMAKE_ARGS="-DGGML_CUDA=on" pip install llama-cpp-python
+# Or from prebuilt wheels:
+#   pip install llama-cpp-python --extra-index-url https://abetlen.github.io/llama-cpp-python/whl/cu121
+llama-cpp-python>=0.2.50

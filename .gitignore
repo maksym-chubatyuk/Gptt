@@ -1,0 +1,41 @@
+# macOS
+.DS_Store
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+venv/
+.venv/
+env/
+.env
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Model outputs (large files)
+output/
+models/
+*.gguf
+*.safetensors
+*.bin
+*.pt
+*.pth
+
+# Training data outputs
+data/
+
+# llama.cpp (cloned for conversion)
+llama.cpp/
+
+# Logs
+*.log
+wandb/
+runs/
+
+# Jupyter
+.ipynb_checkpoints/
