@@ -116,10 +116,10 @@ def ensure_models() -> bool:
         size_gb = text_model.stat().st_size / (1024**3)
         print(f"  Text model: {TEXT_MODEL_PATH} ({size_gb:.2f} GB)")
 
-    # Check/download LLaVA vision model (~4.4GB)
+    # Check/download LLaVA vision model (~4GB)
     if not vision_model.exists() or vision_model.stat().st_size < 1000 * 1024 * 1024:
         print("\nLLaVA vision model not found.")
-        if not download_hf_file(LLAVA_REPO, LLAVA_MODEL_FILE, vision_model, "LLaVA model (~4GB)", min_size_mb=4000):
+        if not download_hf_file(LLAVA_REPO, LLAVA_MODEL_FILE, vision_model, "LLaVA model (~4GB)", min_size_mb=3500):
             all_good = False
     else:
         size_gb = vision_model.stat().st_size / (1024**3)
