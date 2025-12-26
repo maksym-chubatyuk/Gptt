@@ -275,35 +275,25 @@ def load_vision_model():
 
 def get_vision_description(vision_model, image_data_uri: str) -> str:
     """Get scene description using LLaVA GGUF."""
-    # Suppress llama.cpp debug output (goes to both stdout and stderr)
-    stdout_fd = sys.stdout.fileno()
-    stderr_fd = sys.stderr.fileno()
-    old_stdout = os.dup(stdout_fd)
-    old_stderr = os.dup(stderr_fd)
-    devnull = os.open(os.devnull, os.O_WRONLY)
-    os.dup2(devnull, stdout_fd)
-    os.dup2(devnull, stderr_fd)
+    response = vision_model.create_chat_completion(
+        messages=[{
+            "role": "user",
+            "content": [
+                {"type": "image_url", "image_url": {"url": image_data_uri}},
+                {"type": "text", "text": "Briefly describe what you see."}
+            ]
+        }],
+        max_tokens=100,
+        temperature=0.1,
+    )
+    return response["choices"][0]["message"]["content"]
 
-    try:
-        response = vision_model.create_chat_completion(
-            messages=[{
-                "role": "user",
-                "content": [
-                    {"type": "image_url", "image_url": {"url": image_data_uri}},
-                    {"type": "text", "text": "Briefly describe what you see."}
-                ]
-            }],
-            max_tokens=100,
-            temperature=0.1,
-        )
-        return response["choices"][0]["message"]["content"]
-    finally:
-        # Restore stdout and stderr
-        os.dup2(old_stdout, stdout_fd)
-        os.dup2(old_stderr, stderr_fd)
-        os.close(devnull)
-        os.close(old_stdout)
-        os.close(old_stderr)
+
+def clear_debug_output():
+    """Clear any debug output that leaked to terminal."""
+    # Move cursor up and clear lines (ANSI escape codes)
+    sys.stdout.write("\033[F\033[K" * 6)  # Clear up to 6 lines of debug
+    sys.stdout.flush()
 
 
 def build_messages(vision_desc: str | None, conversation: list[dict]) -> list[dict]:
@@ -454,9 +444,15 @@ def main():
             messages = build_messages(vision_desc, conversation)
 
             # Generate response
-            print("\nCharlie:", end=" ")
+            print("\nCharlie:", end=" ", flush=True)
             response = generate_response(text_model, messages)
-            print(response)
+            print(response, flush=True)
+
+            # Wait for and clear any debug output from LLaVA
+            if vision_enabled and vision_desc:
+                import time
+                time.sleep(0.3)  # Wait for debug output to flush
+                clear_debug_output()
 
             # Add assistant response to history
             conversation.append({"role": "assistant", "content": response})
