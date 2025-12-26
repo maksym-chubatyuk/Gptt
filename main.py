@@ -17,12 +17,12 @@ from pathlib import Path
 
 # Configuration
 TEXT_MODEL_PATH = "output/model.gguf"
-VISION_MODEL_PATH = "models/llava-v1.6-mistral-7b.Q4_K_M.gguf"
+VISION_MODEL_PATH = "models/ggml-model-q4_k.gguf"
 VISION_CLIP_PATH = "models/mmproj-model-f16.gguf"
 
-# Hugging Face repo for LLaVA vision model
-LLAVA_REPO = "cjpais/llava-v1.6-mistral-7b-gguf"
-LLAVA_MODEL_FILE = "llava-v1.6-mistral-7b.Q4_K_M.gguf"
+# Hugging Face repo for LLaVA vision model (public)
+LLAVA_REPO = "mys/ggml_llava-v1.5-7b"
+LLAVA_MODEL_FILE = "ggml-model-q4_k.gguf"
 LLAVA_CLIP_FILE = "mmproj-model-f16.gguf"
 
 MAX_TOKENS = 256
@@ -153,7 +153,7 @@ def check_dependencies() -> bool:
 
     try:
         from llama_cpp import Llama  # noqa: F401
-        from llama_cpp.llama_chat_format import Llava16ChatHandler  # noqa: F401
+        from llama_cpp.llama_chat_format import Llava15ChatHandler  # noqa: F401
     except ImportError:
         missing.append("llama-cpp-python (with CUDA)")
 
@@ -235,12 +235,12 @@ def load_text_model():
 def load_vision_model():
     """Load LLaVA vision model (GGUF) with CLIP handler."""
     from llama_cpp import Llama
-    from llama_cpp.llama_chat_format import Llava16ChatHandler
+    from llama_cpp.llama_chat_format import Llava15ChatHandler
 
     print(f"  Loading vision model: {VISION_MODEL_PATH}")
     print(f"  Loading CLIP model: {VISION_CLIP_PATH}")
 
-    chat_handler = Llava16ChatHandler(clip_model_path=VISION_CLIP_PATH, verbose=False)
+    chat_handler = Llava15ChatHandler(clip_model_path=VISION_CLIP_PATH, verbose=False)
 
     return Llama(
         model_path=VISION_MODEL_PATH,
