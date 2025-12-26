@@ -20,8 +20,7 @@ TEXT_MODEL_PATH = "output/model.gguf"
 VISION_MODEL_PATH = "models/llava-v1.6-mistral-7b.Q4_K_M.gguf"
 VISION_CLIP_PATH = "models/mmproj-model-f16.gguf"
 
-# Download URLs
-GCS_BUCKET = "gs://maksym-adapters"
+# Download URLs for LLaVA vision model
 LLAVA_MODEL_URL = "https://huggingface.co/cjpais/llava-v1.6-mistral-7b-gguf/resolve/main/llava-v1.6-mistral-7b.Q4_K_M.gguf"
 LLAVA_CLIP_URL = "https://huggingface.co/cjpais/llava-v1.6-mistral-7b-gguf/resolve/main/mmproj-model-f16.gguf"
 
@@ -76,29 +75,6 @@ def download_file(url: str, dest: Path, description: str) -> bool:
         return False
 
 
-def download_from_gcs(gcs_path: str, dest: Path, description: str) -> bool:
-    """Download a file from Google Cloud Storage."""
-    dest.parent.mkdir(parents=True, exist_ok=True)
-
-    print(f"  Downloading {description} from GCS...")
-    print(f"    From: {gcs_path}")
-    print(f"    To: {dest}")
-
-    try:
-        subprocess.run(
-            ["gsutil", "cp", gcs_path, str(dest)],
-            check=True
-        )
-        return True
-    except subprocess.CalledProcessError:
-        print(f"  Error: gsutil failed to download")
-        return False
-    except FileNotFoundError:
-        print("  Error: gsutil not found. Install Google Cloud SDK:")
-        print("    https://cloud.google.com/sdk/docs/install")
-        return False
-
-
 def ensure_models() -> bool:
     """Download any missing models."""
     text_model = Path(TEXT_MODEL_PATH)
@@ -107,14 +83,13 @@ def ensure_models() -> bool:
 
     all_good = True
 
-    # Check/download fine-tuned text model from GCS
+    # Check fine-tuned text model (user downloads manually)
     if not text_model.exists():
-        print("\nFine-tuned text model not found.")
-        gcs_model = f"{GCS_BUCKET}/model.gguf"
-        if not download_from_gcs(gcs_model, text_model, "fine-tuned model"):
-            print("\nAlternatively, run training + conversion first:")
-            print("  bash run.sh")
-            all_good = False
+        print(f"\nFine-tuned text model not found at {TEXT_MODEL_PATH}")
+        print("Download from GCS:")
+        print("  mkdir -p output")
+        print("  gsutil cp gs://maksym-adapters/model.gguf output/")
+        all_good = False
     else:
         size_gb = text_model.stat().st_size / (1024**3)
         print(f"  Text model: {TEXT_MODEL_PATH} ({size_gb:.2f} GB)")

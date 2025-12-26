@@ -1,32 +1,8 @@
-# Requirements for inference scripts
-# Install with: pip install -r requirements-inference.txt
-
-# ==== For main.py and main_4_bit.py (transformers-based) ====
-
-# PyTorch with CUDA support
-# Install with: pip install torch --index-url https://download.pytorch.org/whl/cu121
-torch>=2.1.0
-
-# Hugging Face ecosystem
-transformers>=4.36.0
-accelerate>=0.25.0
-peft>=0.7.0
-
-# Quantization for 4-bit inference (required for main_4_bit.py)
-bitsandbytes>=0.41.0
-
-# Hugging Face model hub
-huggingface_hub>=0.20.0
-
-# Utilities
-safetensors>=0.4.0
-
-# Tokenizer dependencies
-sentencepiece>=0.1.99
-protobuf>=4.21.0
-
-
-# ==== For main_vision.py (GGUF-based with camera) ====
+# Requirements for inference (main.py)
+#
+# Install:
+#   pip install -r requirements-inference.txt
+#   CMAKE_ARGS="-DGGML_CUDA=on" pip install llama-cpp-python
 
 # Camera capture
 opencv-python>=4.8.0
@@ -34,9 +10,5 @@ opencv-python>=4.8.0
 # Image processing
 Pillow>=10.0.0
 
-# llama-cpp-python with CUDA support for GGUF inference
-# Install with CUDA:
+# llama-cpp-python - install separately with CUDA:
 #   CMAKE_ARGS="-DGGML_CUDA=on" pip install llama-cpp-python
-# Or from prebuilt wheels:
-#   pip install llama-cpp-python --extra-index-url https://abetlen.github.io/llama-cpp-python/whl/cu121
-llama-cpp-python>=0.2.50
