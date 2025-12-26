@@ -374,14 +374,26 @@ def get_vision_description(_vision_model, image_data_uri: str) -> str:
 
 
 
-def build_messages(vision_desc: str | None, conversation: list[dict]) -> list[dict]:
+def build_messages(vision_desc: str | None, conversation: list[dict], vision_mode: bool = False) -> list[dict]:
     """Build message list with vision context injected into system prompt."""
     if vision_desc:
         system_content = f"{BASE_SYSTEM_PROMPT}\n\n[CURRENT VISUAL CONTEXT]\n{vision_desc}"
     else:
         system_content = BASE_SYSTEM_PROMPT
 
-    return [{"role": "system", "content": system_content}] + conversation
+    messages = [{"role": "system", "content": system_content}]
+
+    if vision_mode:
+        # In vision mode, conversation only has user messages - insert placeholder assistant responses
+        for i, msg in enumerate(conversation):
+            messages.append(msg)
+            # Add placeholder after each user message except the last
+            if i < len(conversation) - 1:
+                messages.append({"role": "assistant", "content": "I understand. What else?"})
+    else:
+        messages.extend(conversation)
+
+    return messages
 
 
 def generate_response(text_model, messages: list[dict]) -> str:
@@ -522,7 +534,7 @@ def main():
             conversation.append({"role": "user", "content": user_input})
 
             # Build full message list with vision context
-            messages = build_messages(vision_desc, conversation)
+            messages = build_messages(vision_desc, conversation, vision_mode=vision_enabled)
 
             # Generate response
             response = generate_response(text_model, messages)
@@ -530,12 +542,12 @@ def main():
 
             # Add to history
             if vision_enabled:
-                # When vision is on, only keep user messages to avoid stale visual references
-                # (assistant responses mention what it saw, which causes repetition)
+                # When vision is on, only keep user messages (assistant msgs have stale visual refs)
                 # Trim to last N user messages
                 if len(conversation) > max_history:
                     conversation = conversation[-max_history:]
             else:
+                # Normal mode: keep both user and assistant messages
                 conversation.append({"role": "assistant", "content": response})
                 if len(conversation) > max_history * 2:
                     conversation = conversation[-(max_history * 2):]
