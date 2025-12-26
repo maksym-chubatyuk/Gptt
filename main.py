@@ -289,11 +289,31 @@ def get_vision_description(vision_model, image_data_uri: str) -> str:
     return response["choices"][0]["message"]["content"]
 
 
-def clear_debug_output():
-    """Clear any debug output that leaked to terminal."""
-    # Move cursor up and clear lines (ANSI escape codes)
-    sys.stdout.write("\033[F\033[K" * 6)  # Clear up to 6 lines of debug
-    sys.stdout.flush()
+# Global state for output suppression
+_saved_fds = None
+
+def suppress_output():
+    """Suppress stdout/stderr at fd level."""
+    global _saved_fds
+    stdout_fd = sys.stdout.fileno()
+    stderr_fd = sys.stderr.fileno()
+    _saved_fds = (os.dup(stdout_fd), os.dup(stderr_fd))
+    devnull = os.open(os.devnull, os.O_WRONLY)
+    os.dup2(devnull, stdout_fd)
+    os.dup2(devnull, stderr_fd)
+    os.close(devnull)
+
+def restore_output():
+    """Restore stdout/stderr."""
+    global _saved_fds
+    if _saved_fds:
+        os.dup2(_saved_fds[0], sys.stdout.fileno())
+        os.dup2(_saved_fds[1], sys.stderr.fileno())
+        os.close(_saved_fds[0])
+        os.close(_saved_fds[1])
+        _saved_fds = None
+
+
 
 
 def build_messages(vision_desc: str | None, conversation: list[dict]) -> list[dict]:
@@ -432,7 +452,10 @@ def main():
                 print("  [Analyzing view...]", end="", flush=True)
                 image_uri = camera.capture_frame()
                 if image_uri:
+                    suppress_output()  # Suppress LLaVA debug output
                     vision_desc = get_vision_description(vision_model, image_uri)
+                    # Keep suppressed - debug may come async
+                    restore_output()
                     print(" done")
                 else:
                     print(" capture failed")
@@ -443,16 +466,18 @@ def main():
             # Build full message list with vision context
             messages = build_messages(vision_desc, conversation)
 
-            # Generate response
-            print("\nCharlie:", end=" ", flush=True)
-            response = generate_response(text_model, messages)
-            print(response, flush=True)
+            # Generate response (suppress in case of lingering debug)
+            if vision_desc:
+                suppress_output()
 
-            # Wait for and clear any debug output from LLaVA
-            if vision_enabled and vision_desc:
+            response = generate_response(text_model, messages)
+
+            if vision_desc:
                 import time
-                time.sleep(0.3)  # Wait for debug output to flush
-                clear_debug_output()
+                time.sleep(0.2)  # Let any async debug flush to /dev/null
+                restore_output()
+
+            print("\nCharlie:", response, flush=True)
 
             # Add assistant response to history
             conversation.append({"role": "assistant", "content": response})
