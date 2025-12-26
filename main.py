@@ -273,45 +273,121 @@ def load_vision_model():
     return model
 
 
-def get_vision_description(vision_model, image_data_uri: str) -> str:
-    """Get scene description using LLaVA GGUF."""
-    response = vision_model.create_chat_completion(
-        messages=[{
-            "role": "user",
-            "content": [
-                {"type": "image_url", "image_url": {"url": image_data_uri}},
+class VisionServer:
+    """Runs LLaVA in a subprocess to isolate debug output."""
+
+    def __init__(self, model_path: str, clip_path: str):
+        self.model_path = model_path
+        self.clip_path = clip_path
+        self.process = None
+
+    def start(self):
+        """Start the vision server subprocess."""
+        import subprocess
+
+        # Python script that runs as server
+        server_code = '''
+import sys, os, json
+sys.stdout = sys.stderr = open(os.devnull, "w")
+from llama_cpp import Llama
+from llama_cpp.llama_chat_format import Llava15ChatHandler
+
+model_path = sys.argv[1]
+clip_path = sys.argv[2]
+
+handler = Llava15ChatHandler(clip_model_path=clip_path, verbose=False)
+model = Llama(model_path=model_path, chat_handler=handler, n_gpu_layers=-1, n_ctx=2048, verbose=False)
+
+# Signal ready
+os.write(3, b"READY\\n")
+
+# Process requests from fd 4
+req_fd = 4
+resp_fd = 3
+
+while True:
+    data = b""
+    while not data.endswith(b"\\n"):
+        chunk = os.read(req_fd, 4096)
+        if not chunk:
+            sys.exit(0)
+        data += chunk
+
+    image_uri = data.decode().strip()
+    if image_uri == "QUIT":
+        sys.exit(0)
+
+    try:
+        response = model.create_chat_completion(
+            messages=[{"role": "user", "content": [
+                {"type": "image_url", "image_url": {"url": image_uri}},
                 {"type": "text", "text": "Briefly describe what you see."}
-            ]
-        }],
-        max_tokens=100,
-        temperature=0.1,
-    )
-    return response["choices"][0]["message"]["content"]
+            ]}],
+            max_tokens=100,
+            temperature=0.1,
+        )
+        result = response["choices"][0]["message"]["content"]
+    except Exception as e:
+        result = f"Vision error: {e}"
+
+    os.write(resp_fd, (result + "\\n__END__\\n").encode())
+'''
+
+        # Create pipes for communication
+        req_read, req_write = os.pipe()
+        resp_read, resp_write = os.pipe()
+
+        self.process = subprocess.Popen(
+            [sys.executable, "-c", server_code, self.model_path, self.clip_path],
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            pass_fds=(resp_write, req_read),
+        )
+
+        os.close(req_read)
+        os.close(resp_write)
+        self.req_fd = req_write
+        self.resp_fd = resp_read
+
+        # Wait for ready signal
+        ready = b""
+        while b"READY" not in ready:
+            ready += os.read(self.resp_fd, 100)
+
+    def describe(self, image_data_uri: str) -> str:
+        """Get vision description."""
+        if not self.process:
+            return "Vision server not running"
+
+        os.write(self.req_fd, (image_data_uri + "\n").encode())
+
+        response = b""
+        while b"__END__" not in response:
+            response += os.read(self.resp_fd, 4096)
+
+        return response.decode().replace("__END__", "").strip()
+
+    def stop(self):
+        """Stop the vision server."""
+        if self.process:
+            try:
+                os.write(self.req_fd, b"QUIT\n")
+                self.process.wait(timeout=5)
+            except:
+                self.process.kill()
+            os.close(self.req_fd)
+            os.close(self.resp_fd)
 
 
-# Global state for output suppression
-_saved_fds = None
+_vision_server = None
 
-def suppress_output():
-    """Suppress stdout/stderr at fd level."""
-    global _saved_fds
-    stdout_fd = sys.stdout.fileno()
-    stderr_fd = sys.stderr.fileno()
-    _saved_fds = (os.dup(stdout_fd), os.dup(stderr_fd))
-    devnull = os.open(os.devnull, os.O_WRONLY)
-    os.dup2(devnull, stdout_fd)
-    os.dup2(devnull, stderr_fd)
-    os.close(devnull)
-
-def restore_output():
-    """Restore stdout/stderr."""
-    global _saved_fds
-    if _saved_fds:
-        os.dup2(_saved_fds[0], sys.stdout.fileno())
-        os.dup2(_saved_fds[1], sys.stderr.fileno())
-        os.close(_saved_fds[0])
-        os.close(_saved_fds[1])
-        _saved_fds = None
+def get_vision_description(_vision_model, image_data_uri: str) -> str:
+    """Get scene description using LLaVA via subprocess."""
+    global _vision_server
+    if _vision_server:
+        return _vision_server.describe(image_data_uri)
+    return "Vision not available"
 
 
 
@@ -370,7 +446,10 @@ def main():
     # Load models
     print("\nLoading models...")
     text_model = load_text_model()
-    vision_model = load_vision_model()
+    print("  Starting vision server...")
+    global _vision_server
+    _vision_server = VisionServer(VISION_MODEL_PATH, VISION_CLIP_PATH)
+    _vision_server.start()
     print("  Models loaded!")
 
     # Initialize camera
@@ -424,7 +503,7 @@ def main():
                     print("\n  [Capturing...]", end="", flush=True)
                     image_uri = camera.capture_frame()
                     if image_uri:
-                        desc = get_vision_description(vision_model, image_uri)
+                        desc = get_vision_description(None, image_uri)
                         print(f" done\n\n[Current view]: {desc}")
                     else:
                         print(" failed to capture")
@@ -452,10 +531,7 @@ def main():
                 print("  [Analyzing view...]", end="", flush=True)
                 image_uri = camera.capture_frame()
                 if image_uri:
-                    suppress_output()  # Suppress LLaVA debug output
-                    vision_desc = get_vision_description(vision_model, image_uri)
-                    # Keep suppressed - debug may come async
-                    restore_output()
+                    vision_desc = get_vision_description(None, image_uri)
                     print(" done")
                 else:
                     print(" capture failed")
@@ -466,17 +542,8 @@ def main():
             # Build full message list with vision context
             messages = build_messages(vision_desc, conversation)
 
-            # Generate response (suppress in case of lingering debug)
-            if vision_desc:
-                suppress_output()
-
+            # Generate response
             response = generate_response(text_model, messages)
-
-            if vision_desc:
-                import time
-                time.sleep(0.2)  # Let any async debug flush to /dev/null
-                restore_output()
-
             print("\nCharlie:", response, flush=True)
 
             # Add assistant response to history
@@ -495,6 +562,8 @@ def main():
 
     # Cleanup
     camera.release()
+    if _vision_server:
+        _vision_server.stop()
 
 
 if __name__ == "__main__":
