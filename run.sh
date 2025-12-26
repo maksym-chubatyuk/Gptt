@@ -44,11 +44,12 @@ fi
 echo ""
 echo "[6/7] Building llama.cpp quantize tool..."
 cd llama.cpp
-if [ ! -f "quantize" ] && [ ! -f "llama-quantize" ] && [ ! -f "build/bin/llama-quantize" ]; then
-    echo "  Building quantize..."
-    make -j quantize
+if [ ! -f "build/bin/llama-quantize" ]; then
+    echo "  Building with CMake..."
+    cmake -B build
+    cmake --build build --target llama-quantize -j
 else
-    echo "  quantize already built"
+    echo "  llama-quantize already built"
 fi
 cd ..
 

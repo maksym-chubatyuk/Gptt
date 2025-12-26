@@ -152,28 +152,30 @@ def convert_to_gguf():
     print("Step 3: Quantizing to Q4_K_M (4-bit)")
     print("=" * 50)
 
-    # Find llama-quantize binary (may need to be built)
+    # Find llama-quantize binary (CMake build location)
     quantize_bin = Path(LLAMA_CPP_PATH) / "build" / "bin" / "llama-quantize"
     if not quantize_bin.exists():
-        quantize_bin = Path(LLAMA_CPP_PATH) / "llama-quantize"
-    if not quantize_bin.exists():
-        quantize_bin = Path(LLAMA_CPP_PATH) / "quantize"
-    if not quantize_bin.exists():
-        # Try to build it
-        print("llama-quantize not found. Attempting to build llama.cpp...")
+        # Try to build it with CMake
+        print("llama-quantize not found. Attempting to build with CMake...")
         try:
             subprocess.run(
-                ["make", "-j", "quantize"],
+                ["cmake", "-B", "build"],
                 cwd=LLAMA_CPP_PATH,
                 check=True,
             )
-            quantize_bin = Path(LLAMA_CPP_PATH) / "quantize"
+            subprocess.run(
+                ["cmake", "--build", "build", "--target", "llama-quantize", "-j"],
+                cwd=LLAMA_CPP_PATH,
+                check=True,
+            )
+            quantize_bin = Path(LLAMA_CPP_PATH) / "build" / "bin" / "llama-quantize"
         except subprocess.CalledProcessError:
             print("Error: Could not build llama-quantize.")
             print("The f16 GGUF is ready, but not quantized.")
             print(f"You can manually quantize with:")
-            print(f"  cd {LLAMA_CPP_PATH} && make quantize")
-            print(f"  ./quantize {f16_gguf} {GGUF_PATH} Q4_K_M")
+            print(f"  cd {LLAMA_CPP_PATH}")
+            print(f"  cmake -B build && cmake --build build --target llama-quantize -j")
+            print(f"  ./build/bin/llama-quantize {f16_gguf} {GGUF_PATH} Q4_K_M")
             # Copy f16 as fallback
             import shutil
             shutil.copy(f16_gguf, GGUF_PATH)
