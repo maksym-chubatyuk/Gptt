@@ -45,34 +45,46 @@ When responding:
 - Do not reference radio shows, episodes, tapes, or other media"""
 
 
-def download_file(url: str, dest: Path, description: str) -> bool:
+def download_file(url: str, dest: Path, description: str, min_size_mb: int = 100) -> bool:
     """Download a file using wget or curl."""
     dest.parent.mkdir(parents=True, exist_ok=True)
+
+    # Remove failed previous download
+    if dest.exists() and dest.stat().st_size < min_size_mb * 1024 * 1024:
+        dest.unlink()
 
     print(f"  Downloading {description}...")
     print(f"    From: {url}")
     print(f"    To: {dest}")
 
-    # Try wget first, then curl
+    # Try curl first (better redirect handling), then wget
     try:
         subprocess.run(
-            ["wget", "-q", "--show-progress", "-O", str(dest), url],
+            ["curl", "-L", "--progress-bar", "-o", str(dest), url],
             check=True
         )
-        return True
     except (subprocess.CalledProcessError, FileNotFoundError):
-        pass
+        try:
+            subprocess.run(
+                ["wget", "--progress=bar:force", "-O", str(dest), url],
+                check=True
+            )
+        except (subprocess.CalledProcessError, FileNotFoundError):
+            print(f"  Error: Could not download {description}")
+            print("  Please install curl or wget")
+            return False
 
-    try:
-        subprocess.run(
-            ["curl", "-L", "-#", "-o", str(dest), url],
-            check=True
-        )
+    # Verify download succeeded (not just an error page)
+    if dest.exists():
+        size_mb = dest.stat().st_size / (1024 * 1024)
+        if size_mb < min_size_mb:
+            print(f"  Error: Download failed (got {size_mb:.1f} MB, expected >{min_size_mb} MB)")
+            dest.unlink()
+            return False
+        print(f"  Downloaded: {size_mb:.0f} MB")
         return True
-    except (subprocess.CalledProcessError, FileNotFoundError):
-        print(f"  Error: Could not download {description}")
-        print("  Please install wget or curl")
-        return False
+
+    return False
 
 
 def ensure_models() -> bool:
@@ -94,19 +106,19 @@ def ensure_models() -> bool:
         size_gb = text_model.stat().st_size / (1024**3)
         print(f"  Text model: {TEXT_MODEL_PATH} ({size_gb:.2f} GB)")
 
-    # Check/download LLaVA vision model
-    if not vision_model.exists():
+    # Check/download LLaVA vision model (~4.4GB)
+    if not vision_model.exists() or vision_model.stat().st_size < 1000 * 1024 * 1024:
         print("\nLLaVA vision model not found.")
-        if not download_file(LLAVA_MODEL_URL, vision_model, "LLaVA model (~4GB)"):
+        if not download_file(LLAVA_MODEL_URL, vision_model, "LLaVA model (~4GB)", min_size_mb=4000):
             all_good = False
     else:
         size_gb = vision_model.stat().st_size / (1024**3)
         print(f"  Vision model: {VISION_MODEL_PATH} ({size_gb:.2f} GB)")
 
-    # Check/download LLaVA CLIP model
-    if not vision_clip.exists():
+    # Check/download LLaVA CLIP model (~600MB)
+    if not vision_clip.exists() or vision_clip.stat().st_size < 100 * 1024 * 1024:
         print("\nLLaVA CLIP model not found.")
-        if not download_file(LLAVA_CLIP_URL, vision_clip, "CLIP model (~600MB)"):
+        if not download_file(LLAVA_CLIP_URL, vision_clip, "CLIP model (~600MB)", min_size_mb=500):
             all_good = False
     else:
         size_mb = vision_clip.stat().st_size / (1024**2)
