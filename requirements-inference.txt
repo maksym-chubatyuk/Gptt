@@ -10,5 +10,8 @@ opencv-python>=4.8.0
 # Image processing
 Pillow>=10.0.0
 
+# Hugging Face model downloads
+huggingface_hub>=0.20.0
+
 # llama-cpp-python - install separately with CUDA:
 #   CMAKE_ARGS="-DGGML_CUDA=on" pip install llama-cpp-python

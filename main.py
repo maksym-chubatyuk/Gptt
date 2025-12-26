@@ -20,9 +20,10 @@ TEXT_MODEL_PATH = "output/model.gguf"
 VISION_MODEL_PATH = "models/llava-v1.6-mistral-7b.Q4_K_M.gguf"
 VISION_CLIP_PATH = "models/mmproj-model-f16.gguf"
 
-# Download URLs for LLaVA vision model
-LLAVA_MODEL_URL = "https://huggingface.co/cjpais/llava-v1.6-mistral-7b-gguf/resolve/main/llava-v1.6-mistral-7b.Q4_K_M.gguf"
-LLAVA_CLIP_URL = "https://huggingface.co/cjpais/llava-v1.6-mistral-7b-gguf/resolve/main/mmproj-model-f16.gguf"
+# Hugging Face repo for LLaVA vision model
+LLAVA_REPO = "cjpais/llava-v1.6-mistral-7b-gguf"
+LLAVA_MODEL_FILE = "llava-v1.6-mistral-7b.Q4_K_M.gguf"
+LLAVA_CLIP_FILE = "mmproj-model-f16.gguf"
 
 MAX_TOKENS = 256
 TEMPERATURE = 0.4
@@ -45,9 +46,14 @@ When responding:
 - Do not reference radio shows, episodes, tapes, or other media"""
 
 
-def download_file(url: str, dest: Path, description: str, min_size_mb: int = 100) -> bool:
-    """Download a file from Hugging Face."""
-    import urllib.request
+def download_hf_file(repo_id: str, filename: str, dest: Path, description: str, min_size_mb: int = 100) -> bool:
+    """Download a file from Hugging Face using huggingface_hub."""
+    try:
+        from huggingface_hub import hf_hub_download
+    except ImportError:
+        print("  Error: huggingface_hub not installed")
+        print("  Run: pip install huggingface_hub")
+        return False
 
     dest.parent.mkdir(parents=True, exist_ok=True)
 
@@ -56,23 +62,26 @@ def download_file(url: str, dest: Path, description: str, min_size_mb: int = 100
         dest.unlink()
 
     print(f"  Downloading {description}...")
-    print(f"    From: {url}")
-    print(f"    To: {dest}")
+    print(f"    Repo: {repo_id}")
+    print(f"    File: {filename}")
 
     try:
-        def progress_hook(block_num, block_size, total_size):
-            downloaded = block_num * block_size
-            if total_size > 0:
-                percent = min(100, downloaded * 100 / total_size)
-                downloaded_mb = downloaded / (1024 * 1024)
-                total_mb = total_size / (1024 * 1024)
-                print(f"\r    Progress: {percent:.1f}% ({downloaded_mb:.0f}/{total_mb:.0f} MB)", end="", flush=True)
+        downloaded_path = hf_hub_download(
+            repo_id=repo_id,
+            filename=filename,
+            local_dir=dest.parent,
+            local_dir_use_symlinks=False,
+        )
 
-        urllib.request.urlretrieve(url, dest, reporthook=progress_hook)
-        print()  # newline after progress
+        # Move to expected location if needed
+        downloaded = Path(downloaded_path)
+        if downloaded != dest:
+            import shutil
+            shutil.move(str(downloaded), str(dest))
 
     except Exception as e:
-        print(f"\n  Error downloading: {e}")
+        print(f"  Error downloading: {e}")
+        print("  You may need to login: huggingface-cli login")
         return False
 
     # Verify download succeeded
@@ -110,7 +119,7 @@ def ensure_models() -> bool:
     # Check/download LLaVA vision model (~4.4GB)
     if not vision_model.exists() or vision_model.stat().st_size < 1000 * 1024 * 1024:
         print("\nLLaVA vision model not found.")
-        if not download_file(LLAVA_MODEL_URL, vision_model, "LLaVA model (~4GB)", min_size_mb=4000):
+        if not download_hf_file(LLAVA_REPO, LLAVA_MODEL_FILE, vision_model, "LLaVA model (~4GB)", min_size_mb=4000):
             all_good = False
     else:
         size_gb = vision_model.stat().st_size / (1024**3)
@@ -119,7 +128,7 @@ def ensure_models() -> bool:
     # Check/download LLaVA CLIP model (~600MB)
     if not vision_clip.exists() or vision_clip.stat().st_size < 100 * 1024 * 1024:
         print("\nLLaVA CLIP model not found.")
-        if not download_file(LLAVA_CLIP_URL, vision_clip, "CLIP model (~600MB)", min_size_mb=500):
+        if not download_hf_file(LLAVA_REPO, LLAVA_CLIP_FILE, vision_clip, "CLIP model (~600MB)", min_size_mb=500):
             all_good = False
     else:
         size_mb = vision_clip.stat().st_size / (1024**2)
