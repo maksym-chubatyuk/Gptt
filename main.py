@@ -528,12 +528,17 @@ def main():
             response = generate_response(text_model, messages)
             print("\nCharlie:", response, flush=True)
 
-            # Add assistant response to history
-            conversation.append({"role": "assistant", "content": response})
-
-            # Trim conversation history (keep last max_history exchanges)
-            if len(conversation) > max_history * 2:
-                conversation = conversation[-(max_history * 2):]
+            # Add to history
+            if vision_enabled:
+                # When vision is on, only keep user messages to avoid stale visual references
+                # (assistant responses mention what it saw, which causes repetition)
+                # Trim to last N user messages
+                if len(conversation) > max_history:
+                    conversation = conversation[-max_history:]
+            else:
+                conversation.append({"role": "assistant", "content": response})
+                if len(conversation) > max_history * 2:
+                    conversation = conversation[-(max_history * 2):]
 
         except KeyboardInterrupt:
             print("\n\nGoodbye!")
