@@ -46,7 +46,9 @@ When responding:
 
 
 def download_file(url: str, dest: Path, description: str, min_size_mb: int = 100) -> bool:
-    """Download a file using wget or curl."""
+    """Download a file from Hugging Face."""
+    import urllib.request
+
     dest.parent.mkdir(parents=True, exist_ok=True)
 
     # Remove failed previous download
@@ -57,31 +59,30 @@ def download_file(url: str, dest: Path, description: str, min_size_mb: int = 100
     print(f"    From: {url}")
     print(f"    To: {dest}")
 
-    # Try curl first (better redirect handling), then wget
     try:
-        subprocess.run(
-            ["curl", "-L", "--progress-bar", "-o", str(dest), url],
-            check=True
-        )
-    except (subprocess.CalledProcessError, FileNotFoundError):
-        try:
-            subprocess.run(
-                ["wget", "--progress=bar:force", "-O", str(dest), url],
-                check=True
-            )
-        except (subprocess.CalledProcessError, FileNotFoundError):
-            print(f"  Error: Could not download {description}")
-            print("  Please install curl or wget")
-            return False
+        def progress_hook(block_num, block_size, total_size):
+            downloaded = block_num * block_size
+            if total_size > 0:
+                percent = min(100, downloaded * 100 / total_size)
+                downloaded_mb = downloaded / (1024 * 1024)
+                total_mb = total_size / (1024 * 1024)
+                print(f"\r    Progress: {percent:.1f}% ({downloaded_mb:.0f}/{total_mb:.0f} MB)", end="", flush=True)
 
-    # Verify download succeeded (not just an error page)
+        urllib.request.urlretrieve(url, dest, reporthook=progress_hook)
+        print()  # newline after progress
+
+    except Exception as e:
+        print(f"\n  Error downloading: {e}")
+        return False
+
+    # Verify download succeeded
     if dest.exists():
         size_mb = dest.stat().st_size / (1024 * 1024)
         if size_mb < min_size_mb:
-            print(f"  Error: Download failed (got {size_mb:.1f} MB, expected >{min_size_mb} MB)")
+            print(f"  Error: Download incomplete (got {size_mb:.1f} MB, expected >{min_size_mb} MB)")
             dest.unlink()
             return False
-        print(f"  Downloaded: {size_mb:.0f} MB")
+        print(f"  Done: {size_mb:.0f} MB")
         return True
 
     return False
