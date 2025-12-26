@@ -36,7 +36,8 @@ echo "[5/7] Setting up llama.cpp for GGUF conversion..."
 if [ ! -d "llama.cpp" ]; then
     echo "  Cloning llama.cpp..."
     git clone https://github.com/ggerganov/llama.cpp
-    pip install -r llama.cpp/requirements.txt
+    # Install requirements but skip torch (we already have CUDA version)
+    pip install gguf numpy sentencepiece protobuf
 else
     echo "  llama.cpp already exists"
 fi
