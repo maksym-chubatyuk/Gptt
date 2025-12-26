@@ -35,16 +35,15 @@ TEMPERATURE = 0.4
 TOP_P = 0.8
 CONTEXT_SIZE = 2048
 
-# System prompt for the persona (matches training)
+# System prompt for the persona (matches training format)
 BASE_SYSTEM_PROMPT = """You are Charlie Kirk, founder and president of Turning Point USA. You are a conservative political commentator and author.
 
 When responding:
 - Answer the specific question asked, staying focused on that topic
 - Keep responses concise (2-4 sentences for simple questions, up to a paragraph for complex topics)
 - Speak directly to the person asking, not to a broadcast audience
-- Use "I think" and "I believe" rather than rhetorical questions
 - Do not reference radio shows, episodes, tapes, or other media
-- IMPORTANT: Only mention what you see if the user asks about it directly (e.g. "what do you see?"). Otherwise, ignore the visual context completely and just answer their question."""
+- You can see the user through a camera. ONLY describe what you see if directly asked (e.g. "what do you see?"). For all other questions, ignore the visual context entirely."""
 
 
 def download_hf_file(repo_id: str, filename: str, dest: Path, description: str, min_size_mb: int = 100) -> bool:
@@ -315,9 +314,9 @@ for line in sys.stdin:
         response = model.create_chat_completion(
             messages=[{"role": "user", "content": [
                 {"type": "image_url", "image_url": {"url": image_uri}},
-                {"type": "text", "text": "Briefly describe what you see."}
+                {"type": "text", "text": "In 10 words or less, what is in this image?"}
             ]}],
-            max_tokens=100,
+            max_tokens=30,
             temperature=0.1,
         )
         result = response["choices"][0]["message"]["content"].replace("\\n", " ")
@@ -374,26 +373,14 @@ def get_vision_description(_vision_model, image_data_uri: str) -> str:
 
 
 
-def build_messages(vision_desc: str | None, conversation: list[dict], vision_mode: bool = False) -> list[dict]:
+def build_messages(vision_desc: str | None, conversation: list[dict]) -> list[dict]:
     """Build message list with vision context injected into system prompt."""
     if vision_desc:
         system_content = f"{BASE_SYSTEM_PROMPT}\n\n[CURRENT VISUAL CONTEXT]\n{vision_desc}"
     else:
         system_content = BASE_SYSTEM_PROMPT
 
-    messages = [{"role": "system", "content": system_content}]
-
-    if vision_mode:
-        # In vision mode, conversation only has user messages - insert placeholder assistant responses
-        for i, msg in enumerate(conversation):
-            messages.append(msg)
-            # Add placeholder after each user message except the last
-            if i < len(conversation) - 1:
-                messages.append({"role": "assistant", "content": "I understand. What else?"})
-    else:
-        messages.extend(conversation)
-
-    return messages
+    return [{"role": "system", "content": system_content}] + conversation
 
 
 def generate_response(text_model, messages: list[dict]) -> str:
@@ -534,23 +521,16 @@ def main():
             conversation.append({"role": "user", "content": user_input})
 
             # Build full message list with vision context
-            messages = build_messages(vision_desc, conversation, vision_mode=vision_enabled)
+            messages = build_messages(vision_desc, conversation)
 
             # Generate response
             response = generate_response(text_model, messages)
             print("\nCharlie:", response, flush=True)
 
             # Add to history
-            if vision_enabled:
-                # When vision is on, only keep user messages (assistant msgs have stale visual refs)
-                # Trim to last N user messages
-                if len(conversation) > max_history:
-                    conversation = conversation[-max_history:]
-            else:
-                # Normal mode: keep both user and assistant messages
-                conversation.append({"role": "assistant", "content": response})
-                if len(conversation) > max_history * 2:
-                    conversation = conversation[-(max_history * 2):]
+            conversation.append({"role": "assistant", "content": response})
+            if len(conversation) > max_history * 2:
+                conversation = conversation[-(max_history * 2):]
 
         except KeyboardInterrupt:
             print("\n\nGoodbye!")
