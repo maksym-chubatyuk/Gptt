@@ -6,29 +6,24 @@ Uses llama-cpp-python for both:
 - LLaVA GGUF (vision/image understanding)
 
 Captures camera frame before each response to give the model "sight".
+Auto-downloads required models if not present.
 """
 
 import base64
 import io
+import subprocess
 import sys
 from pathlib import Path
-
-import cv2
-from PIL import Image
-
-try:
-    from llama_cpp import Llama
-    from llama_cpp.llama_chat_format import Llava16ChatHandler
-except ImportError:
-    print("Error: llama-cpp-python not installed.")
-    print("Install with CUDA support:")
-    print('  CMAKE_ARGS="-DGGML_CUDA=on" pip install llama-cpp-python')
-    sys.exit(1)
 
 # Configuration
 TEXT_MODEL_PATH = "output/model.gguf"
 VISION_MODEL_PATH = "models/llava-v1.6-mistral-7b.Q4_K_M.gguf"
 VISION_CLIP_PATH = "models/mmproj-model-f16.gguf"
+
+# Download URLs
+GCS_BUCKET = "gs://maksym-adapters"
+LLAVA_MODEL_URL = "https://huggingface.co/cjpais/llava-v1.6-mistral-7b-gguf/resolve/main/llava-v1.6-mistral-7b.Q4_K_M.gguf"
+LLAVA_CLIP_URL = "https://huggingface.co/cjpais/llava-v1.6-mistral-7b-gguf/resolve/main/mmproj-model-f16.gguf"
 
 MAX_TOKENS = 256
 TEMPERATURE = 0.4
@@ -51,6 +46,132 @@ When responding:
 - Do not reference radio shows, episodes, tapes, or other media"""
 
 
+def download_file(url: str, dest: Path, description: str) -> bool:
+    """Download a file using wget or curl."""
+    dest.parent.mkdir(parents=True, exist_ok=True)
+
+    print(f"  Downloading {description}...")
+    print(f"    From: {url}")
+    print(f"    To: {dest}")
+
+    # Try wget first, then curl
+    try:
+        subprocess.run(
+            ["wget", "-q", "--show-progress", "-O", str(dest), url],
+            check=True
+        )
+        return True
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        pass
+
+    try:
+        subprocess.run(
+            ["curl", "-L", "-#", "-o", str(dest), url],
+            check=True
+        )
+        return True
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        print(f"  Error: Could not download {description}")
+        print("  Please install wget or curl")
+        return False
+
+
+def download_from_gcs(gcs_path: str, dest: Path, description: str) -> bool:
+    """Download a file from Google Cloud Storage."""
+    dest.parent.mkdir(parents=True, exist_ok=True)
+
+    print(f"  Downloading {description} from GCS...")
+    print(f"    From: {gcs_path}")
+    print(f"    To: {dest}")
+
+    try:
+        subprocess.run(
+            ["gsutil", "cp", gcs_path, str(dest)],
+            check=True
+        )
+        return True
+    except subprocess.CalledProcessError:
+        print(f"  Error: gsutil failed to download")
+        return False
+    except FileNotFoundError:
+        print("  Error: gsutil not found. Install Google Cloud SDK:")
+        print("    https://cloud.google.com/sdk/docs/install")
+        return False
+
+
+def ensure_models() -> bool:
+    """Download any missing models."""
+    text_model = Path(TEXT_MODEL_PATH)
+    vision_model = Path(VISION_MODEL_PATH)
+    vision_clip = Path(VISION_CLIP_PATH)
+
+    all_good = True
+
+    # Check/download fine-tuned text model from GCS
+    if not text_model.exists():
+        print("\nFine-tuned text model not found.")
+        gcs_model = f"{GCS_BUCKET}/model.gguf"
+        if not download_from_gcs(gcs_model, text_model, "fine-tuned model"):
+            print("\nAlternatively, run training + conversion first:")
+            print("  bash run.sh")
+            all_good = False
+    else:
+        size_gb = text_model.stat().st_size / (1024**3)
+        print(f"  Text model: {TEXT_MODEL_PATH} ({size_gb:.2f} GB)")
+
+    # Check/download LLaVA vision model
+    if not vision_model.exists():
+        print("\nLLaVA vision model not found.")
+        if not download_file(LLAVA_MODEL_URL, vision_model, "LLaVA model (~4GB)"):
+            all_good = False
+    else:
+        size_gb = vision_model.stat().st_size / (1024**3)
+        print(f"  Vision model: {VISION_MODEL_PATH} ({size_gb:.2f} GB)")
+
+    # Check/download LLaVA CLIP model
+    if not vision_clip.exists():
+        print("\nLLaVA CLIP model not found.")
+        if not download_file(LLAVA_CLIP_URL, vision_clip, "CLIP model (~600MB)"):
+            all_good = False
+    else:
+        size_mb = vision_clip.stat().st_size / (1024**2)
+        print(f"  CLIP model: {VISION_CLIP_PATH} ({size_mb:.0f} MB)")
+
+    return all_good
+
+
+def check_dependencies() -> bool:
+    """Check that required packages are installed."""
+    missing = []
+
+    try:
+        import cv2  # noqa: F401
+    except ImportError:
+        missing.append("opencv-python")
+
+    try:
+        from PIL import Image  # noqa: F401
+    except ImportError:
+        missing.append("Pillow")
+
+    try:
+        from llama_cpp import Llama  # noqa: F401
+        from llama_cpp.llama_chat_format import Llava16ChatHandler  # noqa: F401
+    except ImportError:
+        missing.append("llama-cpp-python (with CUDA)")
+
+    if missing:
+        print("Missing dependencies:")
+        for dep in missing:
+            print(f"  - {dep}")
+        print("\nInstall with:")
+        print("  pip install opencv-python Pillow")
+        print('  CMAKE_ARGS="-DGGML_CUDA=on" pip install llama-cpp-python')
+        return False
+
+    return True
+
+
 class CameraCapture:
     """Handles camera capture and image encoding."""
 
@@ -60,6 +181,7 @@ class CameraCapture:
 
     def initialize(self) -> bool:
         """Initialize camera connection."""
+        import cv2
         self.cap = cv2.VideoCapture(self.camera_index)
         if not self.cap.isOpened():
             return False
@@ -70,6 +192,9 @@ class CameraCapture:
 
     def capture_frame(self) -> str | None:
         """Capture frame and return as base64 data URI."""
+        import cv2
+        from PIL import Image
+
         if not self.cap or not self.cap.isOpened():
             return None
 
@@ -97,35 +222,10 @@ class CameraCapture:
             self.cap.release()
 
 
-def check_models() -> bool:
-    """Check that all model files exist."""
-    text_model = Path(TEXT_MODEL_PATH)
-    vision_model = Path(VISION_MODEL_PATH)
-    vision_clip = Path(VISION_CLIP_PATH)
-
-    if not text_model.exists():
-        print(f"Error: Text model not found at {TEXT_MODEL_PATH}")
-        print("Run merge_and_convert.py first to create the GGUF model.")
-        return False
-
-    if not vision_model.exists():
-        print(f"Error: Vision model not found at {VISION_MODEL_PATH}")
-        print("Download LLaVA GGUF model:")
-        print("  mkdir -p models")
-        print("  wget -P models https://huggingface.co/cjpais/llava-v1.6-mistral-7b-gguf/resolve/main/llava-v1.6-mistral-7b.Q4_K_M.gguf")
-        return False
-
-    if not vision_clip.exists():
-        print(f"Error: Vision CLIP model not found at {VISION_CLIP_PATH}")
-        print("Download mmproj model:")
-        print("  wget -P models https://huggingface.co/cjpais/llava-v1.6-mistral-7b-gguf/resolve/main/mmproj-model-f16.gguf")
-        return False
-
-    return True
-
-
-def load_text_model() -> Llama:
+def load_text_model():
     """Load the fine-tuned text model (GGUF)."""
+    from llama_cpp import Llama
+
     print(f"  Loading text model: {TEXT_MODEL_PATH}")
     return Llama(
         model_path=TEXT_MODEL_PATH,
@@ -135,8 +235,11 @@ def load_text_model() -> Llama:
     )
 
 
-def load_vision_model() -> Llama:
+def load_vision_model():
     """Load LLaVA vision model (GGUF) with CLIP handler."""
+    from llama_cpp import Llama
+    from llama_cpp.llama_chat_format import Llava16ChatHandler
+
     print(f"  Loading vision model: {VISION_MODEL_PATH}")
     print(f"  Loading CLIP model: {VISION_CLIP_PATH}")
 
@@ -151,7 +254,7 @@ def load_vision_model() -> Llama:
     )
 
 
-def get_vision_description(vision_model: Llama, image_data_uri: str) -> str:
+def get_vision_description(vision_model, image_data_uri: str) -> str:
     """Get scene description using LLaVA GGUF."""
     response = vision_model.create_chat_completion(
         messages=[{
@@ -177,7 +280,7 @@ def build_messages(vision_desc: str | None, conversation: list[dict]) -> list[di
     return [{"role": "system", "content": system_content}] + conversation
 
 
-def generate_response(text_model: Llama, messages: list[dict]) -> str:
+def generate_response(text_model, messages: list[dict]) -> str:
     """Generate response using the fine-tuned text model."""
     response = text_model.create_chat_completion(
         messages=messages,
@@ -205,16 +308,21 @@ Just type your message to chat!
 
 def main():
     print("=" * 50)
-    print("  Vision-Enabled Chat - Charlie Kirk")
+    print("  Vision-Enabled Chat")
     print("=" * 50)
     print()
 
-    # Check models exist
-    if not check_models():
+    # Check dependencies first
+    if not check_dependencies():
+        sys.exit(1)
+
+    # Check/download models
+    print("Checking models...")
+    if not ensure_models():
         sys.exit(1)
 
     # Load models
-    print("Loading models...")
+    print("\nLoading models...")
     text_model = load_text_model()
     vision_model = load_vision_model()
     print("  Models loaded!")
