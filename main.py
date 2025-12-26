@@ -253,10 +253,13 @@ def load_vision_model():
 
 def get_vision_description(vision_model, image_data_uri: str) -> str:
     """Get scene description using LLaVA GGUF."""
-    # Suppress llama.cpp debug output
+    # Suppress llama.cpp debug output (goes to both stdout and stderr)
+    stdout_fd = sys.stdout.fileno()
     stderr_fd = sys.stderr.fileno()
+    old_stdout = os.dup(stdout_fd)
     old_stderr = os.dup(stderr_fd)
     devnull = os.open(os.devnull, os.O_WRONLY)
+    os.dup2(devnull, stdout_fd)
     os.dup2(devnull, stderr_fd)
 
     try:
@@ -273,9 +276,11 @@ def get_vision_description(vision_model, image_data_uri: str) -> str:
         )
         return response["choices"][0]["message"]["content"]
     finally:
-        # Restore stderr
+        # Restore stdout and stderr
+        os.dup2(old_stdout, stdout_fd)
         os.dup2(old_stderr, stderr_fd)
         os.close(devnull)
+        os.close(old_stdout)
         os.close(old_stderr)
 
 
