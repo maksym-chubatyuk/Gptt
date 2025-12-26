@@ -11,7 +11,7 @@ Auto-downloads required models if not present.
 
 import base64
 import io
-import subprocess
+import os
 import sys
 from pathlib import Path
 
@@ -253,18 +253,30 @@ def load_vision_model():
 
 def get_vision_description(vision_model, image_data_uri: str) -> str:
     """Get scene description using LLaVA GGUF."""
-    response = vision_model.create_chat_completion(
-        messages=[{
-            "role": "user",
-            "content": [
-                {"type": "image_url", "image_url": {"url": image_data_uri}},
-                {"type": "text", "text": "Describe what you see in 2-3 sentences. Focus on people, their appearance, setting, and any notable objects."}
-            ]
-        }],
-        max_tokens=150,
-        temperature=0.1,  # Low temp for consistent descriptions
-    )
-    return response["choices"][0]["message"]["content"]
+    # Suppress llama.cpp debug output
+    stderr_fd = sys.stderr.fileno()
+    old_stderr = os.dup(stderr_fd)
+    devnull = os.open(os.devnull, os.O_WRONLY)
+    os.dup2(devnull, stderr_fd)
+
+    try:
+        response = vision_model.create_chat_completion(
+            messages=[{
+                "role": "user",
+                "content": [
+                    {"type": "image_url", "image_url": {"url": image_data_uri}},
+                    {"type": "text", "text": "Briefly describe what you see."}
+                ]
+            }],
+            max_tokens=100,
+            temperature=0.1,
+        )
+        return response["choices"][0]["message"]["content"]
+    finally:
+        # Restore stderr
+        os.dup2(old_stderr, stderr_fd)
+        os.close(devnull)
+        os.close(old_stderr)
 
 
 def build_messages(vision_desc: str | None, conversation: list[dict]) -> list[dict]:
