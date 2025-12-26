@@ -101,30 +101,30 @@ def merge_adapters():
 
 
 def convert_to_gguf():
-    """Convert merged HuggingFace model to GGUF format."""
+    """Convert merged HuggingFace model to GGUF format (two-step: convert + quantize)."""
     print("\n" + "=" * 50)
-    print("Step 2: Converting to GGUF")
+    print("Step 2: Converting to GGUF (f16)")
     print("=" * 50)
 
     convert_script = Path(LLAMA_CPP_PATH) / "convert_hf_to_gguf.py"
+    f16_gguf = "output/model-f16.gguf"
 
     # Create output directory
     output_dir = Path(GGUF_PATH).parent
     os.makedirs(output_dir, exist_ok=True)
 
     print(f"\nInput: {MERGED_PATH}")
-    print(f"Output: {GGUF_PATH}")
-    print("Quantization: Q4_K_M (4-bit)")
-    print("\nRunning conversion...")
+    print(f"Output (f16): {f16_gguf}")
+    print("\nRunning conversion to f16 GGUF...")
 
     try:
         result = subprocess.run(
             [
-                sys.executable,  # Use same Python interpreter
+                sys.executable,
                 str(convert_script),
                 MERGED_PATH,
-                "--outfile", GGUF_PATH,
-                "--outtype", "q4_k_m",  # 4-bit quantization
+                "--outfile", f16_gguf,
+                "--outtype", "f16",
             ],
             check=True,
             capture_output=True,
@@ -140,7 +140,73 @@ def convert_to_gguf():
         print("stderr:", e.stderr)
         return False
 
-    # Check output
+    # Check f16 output exists
+    if not Path(f16_gguf).exists():
+        print(f"Error: f16 GGUF not created at {f16_gguf}")
+        return False
+
+    print(f"\nf16 GGUF created: {f16_gguf}")
+
+    # Step 2b: Quantize to Q4_K_M
+    print("\n" + "=" * 50)
+    print("Step 3: Quantizing to Q4_K_M (4-bit)")
+    print("=" * 50)
+
+    # Find llama-quantize binary (may need to be built)
+    quantize_bin = Path(LLAMA_CPP_PATH) / "build" / "bin" / "llama-quantize"
+    if not quantize_bin.exists():
+        quantize_bin = Path(LLAMA_CPP_PATH) / "llama-quantize"
+    if not quantize_bin.exists():
+        quantize_bin = Path(LLAMA_CPP_PATH) / "quantize"
+    if not quantize_bin.exists():
+        # Try to build it
+        print("llama-quantize not found. Attempting to build llama.cpp...")
+        try:
+            subprocess.run(
+                ["make", "-j", "quantize"],
+                cwd=LLAMA_CPP_PATH,
+                check=True,
+            )
+            quantize_bin = Path(LLAMA_CPP_PATH) / "quantize"
+        except subprocess.CalledProcessError:
+            print("Error: Could not build llama-quantize.")
+            print("The f16 GGUF is ready, but not quantized.")
+            print(f"You can manually quantize with:")
+            print(f"  cd {LLAMA_CPP_PATH} && make quantize")
+            print(f"  ./quantize {f16_gguf} {GGUF_PATH} Q4_K_M")
+            # Copy f16 as fallback
+            import shutil
+            shutil.copy(f16_gguf, GGUF_PATH)
+            return True
+
+    print(f"\nQuantizing: {f16_gguf} -> {GGUF_PATH}")
+    print("Quantization type: Q4_K_M")
+
+    try:
+        result = subprocess.run(
+            [str(quantize_bin), f16_gguf, GGUF_PATH, "Q4_K_M"],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        print(result.stdout)
+
+    except subprocess.CalledProcessError as e:
+        print(f"Error during quantization: {e}")
+        print("stdout:", e.stdout)
+        print("stderr:", e.stderr)
+        print(f"\nFalling back to f16 GGUF (larger but usable)")
+        import shutil
+        shutil.copy(f16_gguf, GGUF_PATH)
+
+    # Clean up f16 intermediate file
+    f16_path = Path(f16_gguf)
+    if f16_path.exists() and Path(GGUF_PATH).exists():
+        f16_size = f16_path.stat().st_size / (1024**3)
+        print(f"\nCleaning up intermediate f16 GGUF ({f16_size:.2f} GB)...")
+        f16_path.unlink()
+
+    # Check final output
     gguf_file = Path(GGUF_PATH)
     if gguf_file.exists():
         size_gb = gguf_file.stat().st_size / (1024**3)

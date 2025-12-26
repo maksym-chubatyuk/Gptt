@@ -9,30 +9,30 @@ echo ""
 
 # Check if venv exists
 if [ ! -d "venv" ]; then
-    echo "[1/6] Creating virtual environment..."
+    echo "[1/7] Creating virtual environment..."
     python3 -m venv venv
     source venv/bin/activate
 
-    echo "[2/6] Installing dependencies..."
+    echo "[2/7] Installing dependencies..."
     pip install --upgrade pip
     pip install torch --index-url https://download.pytorch.org/whl/cu121
     pip install transformers datasets peft accelerate sentencepiece protobuf
 else
-    echo "[1/6] Virtual environment exists, activating..."
+    echo "[1/7] Virtual environment exists, activating..."
     source venv/bin/activate
-    echo "[2/6] Dependencies already installed"
+    echo "[2/7] Dependencies already installed"
 fi
 
 echo ""
-echo "[3/6] Preprocessing training data (includes vision examples)..."
+echo "[3/7] Preprocessing training data (includes vision examples)..."
 python3 preprocess.py
 
 echo ""
-echo "[4/6] Starting training..."
+echo "[4/7] Starting training..."
 python3 train.py
 
 echo ""
-echo "[5/6] Setting up llama.cpp for GGUF conversion..."
+echo "[5/7] Setting up llama.cpp for GGUF conversion..."
 if [ ! -d "llama.cpp" ]; then
     echo "  Cloning llama.cpp..."
     git clone https://github.com/ggerganov/llama.cpp
@@ -42,7 +42,18 @@ else
 fi
 
 echo ""
-echo "[6/6] Merging adapters and converting to GGUF..."
+echo "[6/7] Building llama.cpp quantize tool..."
+cd llama.cpp
+if [ ! -f "quantize" ] && [ ! -f "llama-quantize" ] && [ ! -f "build/bin/llama-quantize" ]; then
+    echo "  Building quantize..."
+    make -j quantize
+else
+    echo "  quantize already built"
+fi
+cd ..
+
+echo ""
+echo "[7/7] Merging adapters and converting to GGUF..."
 python3 merge_and_convert.py
 
 echo ""
