@@ -15,6 +15,18 @@ import os
 import sys
 from pathlib import Path
 
+# Suppress llama.cpp C-level logging
+os.environ["LLAMA_LOG_LEVEL"] = "0"
+os.environ["GGML_LOG_LEVEL"] = "0"
+
+def suppress_llama_logging():
+    """Suppress llama.cpp native logging."""
+    try:
+        import llama_cpp
+        llama_cpp.llama_log_set(lambda _level, _msg, _user_data: None, None)
+    except (ImportError, AttributeError):
+        pass
+
 # Configuration
 TEXT_MODEL_PATH = "output/model.gguf"
 VISION_MODEL_PATH = "models/ggml-model-q4_k.gguf"
@@ -240,15 +252,32 @@ def load_vision_model():
     print(f"  Loading vision model: {VISION_MODEL_PATH}")
     print(f"  Loading CLIP model: {VISION_CLIP_PATH}")
 
-    chat_handler = Llava15ChatHandler(clip_model_path=VISION_CLIP_PATH, verbose=False)
+    # Suppress all output during handler creation
+    stdout_fd = sys.stdout.fileno()
+    stderr_fd = sys.stderr.fileno()
+    old_stdout = os.dup(stdout_fd)
+    old_stderr = os.dup(stderr_fd)
+    devnull = os.open(os.devnull, os.O_WRONLY)
+    os.dup2(devnull, stdout_fd)
+    os.dup2(devnull, stderr_fd)
 
-    return Llama(
-        model_path=VISION_MODEL_PATH,
-        chat_handler=chat_handler,
-        n_gpu_layers=-1,
-        n_ctx=CONTEXT_SIZE,
-        verbose=False,
-    )
+    try:
+        chat_handler = Llava15ChatHandler(clip_model_path=VISION_CLIP_PATH, verbose=False)
+        model = Llama(
+            model_path=VISION_MODEL_PATH,
+            chat_handler=chat_handler,
+            n_gpu_layers=-1,
+            n_ctx=CONTEXT_SIZE,
+            verbose=False,
+        )
+    finally:
+        os.dup2(old_stdout, stdout_fd)
+        os.dup2(old_stderr, stderr_fd)
+        os.close(devnull)
+        os.close(old_stdout)
+        os.close(old_stderr)
+
+    return model
 
 
 def get_vision_description(vision_model, image_data_uri: str) -> str:
@@ -337,6 +366,7 @@ def main():
 
     # Load models
     print("\nLoading models...")
+    suppress_llama_logging()
     text_model = load_text_model()
     vision_model = load_vision_model()
     print("  Models loaded!")
