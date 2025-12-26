@@ -18,14 +18,7 @@ from pathlib import Path
 # Suppress llama.cpp C-level logging
 os.environ["LLAMA_LOG_LEVEL"] = "0"
 os.environ["GGML_LOG_LEVEL"] = "0"
-
-def suppress_llama_logging():
-    """Suppress llama.cpp native logging."""
-    try:
-        import llama_cpp
-        llama_cpp.llama_log_set(lambda _level, _msg, _user_data: None, None)
-    except (ImportError, AttributeError):
-        pass
+os.environ["LLAMA_CPP_LOG_LEVEL"] = "0"
 
 # Configuration
 TEXT_MODEL_PATH = "output/model.gguf"
@@ -366,7 +359,6 @@ def main():
 
     # Load models
     print("\nLoading models...")
-    suppress_llama_logging()
     text_model = load_text_model()
     vision_model = load_vision_model()
     print("  Models loaded!")
