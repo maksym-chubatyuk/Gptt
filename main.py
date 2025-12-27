@@ -1,24 +1,28 @@
 #!/usr/bin/env python3
 """
 Vision-enabled CLI chat interface using Qwen3-VL.
-Uses llama-cpp-python for inference with the fine-tuned GGUF model.
+Uses llama.cpp server for inference with the fine-tuned GGUF model.
 Captures camera frame before each response to give the model "sight".
 """
 
+import atexit
 import base64
 import io
 import os
+import platform
+import signal
+import subprocess
 import sys
+import time
 from pathlib import Path
 
-# Suppress llama.cpp C-level logging
-os.environ["LLAMA_LOG_LEVEL"] = "0"
-os.environ["GGML_LOG_LEVEL"] = "0"
-os.environ["LLAMA_CPP_LOG_LEVEL"] = "0"
+import requests
 
 # Configuration
 MODEL_PATH = "output/model.gguf"
 MMPROJ_PATH = "output/mmproj-model.gguf"
+LLAMA_SERVER_PORT = 8080
+LLAMA_SERVER_URL = f"http://localhost:{LLAMA_SERVER_PORT}"
 
 # GCS bucket for model downloads
 GCS_BUCKET = "gs://maksym-adapters"
@@ -26,7 +30,7 @@ GCS_BUCKET = "gs://maksym-adapters"
 MAX_TOKENS = 256
 TEMPERATURE = 0.4
 TOP_P = 0.8
-CONTEXT_SIZE = 2048
+CONTEXT_SIZE = 4096
 
 # System prompt for the persona (matches training format)
 BASE_SYSTEM_PROMPT = """You are Charlie Kirk, founder and president of Turning Point USA. You are a conservative political commentator and author.
@@ -37,6 +41,26 @@ When responding:
 - Speak directly to the person asking, not to a broadcast audience
 - Do not reference radio shows, episodes, tapes, or other media
 - You can see the user through a camera. ONLY describe what you see if directly asked (e.g. "what do you see?"). For all other questions, ignore the visual context entirely."""
+
+# Global server process
+_server_process = None
+
+
+def find_llama_server() -> str | None:
+    """Find the llama-server binary."""
+    # Check common locations
+    candidates = [
+        Path("llama.cpp/build/bin/llama-server"),
+        Path("llama.cpp/build/llama-server"),
+        Path("/usr/local/bin/llama-server"),
+        Path("/usr/bin/llama-server"),
+    ]
+
+    for path in candidates:
+        if path.exists():
+            return str(path)
+
+    return None
 
 
 def check_dependencies() -> bool:
@@ -54,17 +78,28 @@ def check_dependencies() -> bool:
         missing.append("Pillow")
 
     try:
-        from llama_cpp import Llama  # noqa: F401
+        import requests  # noqa: F401
     except ImportError:
-        missing.append("llama-cpp-python (with CUDA)")
+        missing.append("requests")
 
     if missing:
         print("Missing dependencies:")
         for dep in missing:
             print(f"  - {dep}")
         print("\nInstall with:")
-        print("  pip install opencv-python Pillow")
-        print('  CMAKE_ARGS="-DGGML_CUDA=on" pip install llama-cpp-python')
+        print("  pip install opencv-python Pillow requests")
+        return False
+
+    # Check for llama-server
+    if not find_llama_server():
+        print("\nllama-server not found!")
+        print("Build it with:")
+        print("  cd llama.cpp")
+        if platform.system() == "Darwin":
+            print("  cmake -B build -DGGML_METAL=on")
+        else:
+            print("  cmake -B build -DGGML_CUDA=on")
+        print("  cmake --build build --target llama-server -j")
         return False
 
     return True
@@ -98,6 +133,106 @@ def ensure_models() -> bool:
         print(f"    gsutil cp {GCS_BUCKET}/mmproj-model.gguf output/")
 
     return all_good
+
+
+def start_llama_server() -> bool:
+    """Start the llama.cpp server as a subprocess."""
+    global _server_process
+
+    server_bin = find_llama_server()
+    if not server_bin:
+        print("Error: llama-server not found")
+        return False
+
+    # Build command
+    cmd = [
+        server_bin,
+        "-m", MODEL_PATH,
+        "--port", str(LLAMA_SERVER_PORT),
+        "-ngl", "-1",  # All layers on GPU
+        "-c", str(CONTEXT_SIZE),
+        "--log-disable",  # Suppress logs
+    ]
+
+    # Add vision projector if available
+    mmproj_path = Path(MMPROJ_PATH)
+    if mmproj_path.exists():
+        cmd.extend(["--mmproj", str(mmproj_path)])
+
+    # Start server
+    _server_process = subprocess.Popen(
+        cmd,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+    atexit.register(stop_llama_server)
+
+    # Wait for server to be ready
+    print("  Waiting for server...", end="", flush=True)
+    for i in range(60):  # Up to 60 seconds
+        try:
+            response = requests.get(f"{LLAMA_SERVER_URL}/health", timeout=1)
+            if response.status_code == 200:
+                print(" ready!")
+                return True
+        except requests.exceptions.RequestException:
+            pass
+
+        # Check if process died
+        if _server_process.poll() is not None:
+            print(" failed (server crashed)")
+            return False
+
+        print(".", end="", flush=True)
+        time.sleep(1)
+
+    print(" timeout")
+    return False
+
+
+def stop_llama_server():
+    """Stop the llama.cpp server."""
+    global _server_process
+    if _server_process:
+        _server_process.terminate()
+        try:
+            _server_process.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            _server_process.kill()
+        _server_process = None
+
+
+def check_server_running() -> bool:
+    """Check if the server is already running."""
+    try:
+        response = requests.get(f"{LLAMA_SERVER_URL}/health", timeout=1)
+        return response.status_code == 200
+    except requests.exceptions.RequestException:
+        return False
+
+
+def kill_existing_server():
+    """Kill any existing llama-server process on our port."""
+    import subprocess
+    try:
+        # Find and kill process using our port
+        if platform.system() == "Darwin":
+            # macOS
+            result = subprocess.run(
+                ["lsof", "-ti", f":{LLAMA_SERVER_PORT}"],
+                capture_output=True, text=True
+            )
+            if result.stdout.strip():
+                for pid in result.stdout.strip().split('\n'):
+                    subprocess.run(["kill", "-9", pid], capture_output=True)
+        else:
+            # Linux
+            subprocess.run(
+                ["fuser", "-k", f"{LLAMA_SERVER_PORT}/tcp"],
+                capture_output=True
+            )
+    except Exception:
+        pass  # Best effort
 
 
 class CameraCapture:
@@ -150,53 +285,6 @@ class CameraCapture:
             self.cap.release()
 
 
-def load_model():
-    """Load the fine-tuned Qwen3-VL model."""
-    from llama_cpp import Llama
-
-    print(f"  Loading model: {MODEL_PATH}")
-
-    # Check if we have a vision projector
-    mmproj_path = Path(MMPROJ_PATH)
-    chat_handler = None
-
-    if mmproj_path.exists():
-        try:
-            # Try to load with vision support
-            from llama_cpp.llama_chat_format import Qwen2VLChatHandler
-            print(f"  Loading vision projector: {MMPROJ_PATH}")
-            chat_handler = Qwen2VLChatHandler(clip_model_path=str(mmproj_path), verbose=False)
-        except (ImportError, Exception) as e:
-            print(f"  Note: Vision handler not available ({e})")
-            print("  Running in text-only mode")
-
-    # Suppress output during model load
-    stdout_fd = sys.stdout.fileno()
-    stderr_fd = sys.stderr.fileno()
-    old_stdout = os.dup(stdout_fd)
-    old_stderr = os.dup(stderr_fd)
-    devnull = os.open(os.devnull, os.O_WRONLY)
-    os.dup2(devnull, stdout_fd)
-    os.dup2(devnull, stderr_fd)
-
-    try:
-        model = Llama(
-            model_path=MODEL_PATH,
-            chat_handler=chat_handler,
-            n_gpu_layers=-1,  # Use all GPU layers
-            n_ctx=CONTEXT_SIZE,
-            verbose=False,
-        )
-    finally:
-        os.dup2(old_stdout, stdout_fd)
-        os.dup2(old_stderr, stderr_fd)
-        os.close(devnull)
-        os.close(old_stdout)
-        os.close(old_stderr)
-
-    return model, chat_handler is not None
-
-
 def build_messages(conversation: list[dict], user_input: str, image_uri: str | None, vision_enabled: bool) -> list[dict]:
     """Build message list with optional image input."""
     messages = [{"role": "system", "content": BASE_SYSTEM_PROMPT}]
@@ -218,15 +306,25 @@ def build_messages(conversation: list[dict], user_input: str, image_uri: str | N
     return messages
 
 
-def generate_response(model, messages: list[dict]) -> str:
-    """Generate response using the model."""
-    response = model.create_chat_completion(
-        messages=messages,
-        max_tokens=MAX_TOKENS,
-        temperature=TEMPERATURE,
-        top_p=TOP_P,
-    )
-    return response["choices"][0]["message"]["content"]
+def generate_response(messages: list[dict]) -> str:
+    """Generate response using the llama.cpp server API."""
+    try:
+        response = requests.post(
+            f"{LLAMA_SERVER_URL}/v1/chat/completions",
+            json={
+                "messages": messages,
+                "max_tokens": MAX_TOKENS,
+                "temperature": TEMPERATURE,
+                "top_p": TOP_P,
+            },
+            timeout=120,
+        )
+        response.raise_for_status()
+        return response.json()["choices"][0]["message"]["content"]
+    except requests.exceptions.RequestException as e:
+        return f"[Error communicating with server: {e}]"
+    except (KeyError, IndexError) as e:
+        return f"[Error parsing response: {e}]"
 
 
 def print_help():
@@ -236,7 +334,7 @@ Commands:
   /clear    - Clear conversation history
   /vision   - Toggle vision on/off
   /snapshot - Show what the model currently sees
-  /info     - Show model info and memory usage
+  /info     - Show model info and status
   /help     - Show this help message
   /quit     - Exit the chat
 
@@ -259,15 +357,21 @@ def main():
     if not ensure_models():
         sys.exit(1)
 
-    # Load model
-    print("\nLoading model...")
-    model, has_vision_support = load_model()
-    print("  Model loaded!")
+    # Check if vision projector exists
+    has_vision_support = Path(MMPROJ_PATH).exists()
 
-    if has_vision_support:
-        print("  Vision support: ENABLED")
-    else:
-        print("  Vision support: DISABLED (text-only mode)")
+    # Start server (kill any existing one first)
+    print("\nStarting llama.cpp server...")
+    if check_server_running():
+        print("  Stopping existing server...")
+        kill_existing_server()
+        time.sleep(2)
+
+    if not start_llama_server():
+        print("\nFailed to start server. Try running manually:")
+        server_bin = find_llama_server() or "llama-server"
+        print(f"  {server_bin} -m {MODEL_PATH} --port {LLAMA_SERVER_PORT}")
+        sys.exit(1)
 
     # Initialize camera
     print("\nInitializing camera...")
@@ -292,7 +396,7 @@ def main():
     elif has_vision_support:
         print("Vision: DISABLED (no camera)")
     else:
-        print("Vision: DISABLED (text-only mode)")
+        print("Vision: DISABLED (no vision projector)")
     print("-" * 50)
 
     while True:
@@ -314,7 +418,7 @@ def main():
 
             elif user_input.lower() == "/vision":
                 if not has_vision_support:
-                    print("\nVision not supported (text-only mode).")
+                    print("\nVision not supported (no vision projector).")
                 elif not camera_available:
                     print("\nCamera not available.")
                 else:
@@ -326,7 +430,7 @@ def main():
                 if not camera_available:
                     print("\nCamera not available.")
                 elif not has_vision_support:
-                    print("\nVision not supported in this mode.")
+                    print("\nVision not supported (no vision projector).")
                 else:
                     print("\n  [Capturing...]", end="", flush=True)
                     image_uri = camera.capture_frame()
@@ -340,7 +444,7 @@ def main():
                             ]}
                         ]
                         try:
-                            desc = generate_response(model, snapshot_messages)
+                            desc = generate_response(snapshot_messages)
                             print(f" done\n\n[Current view]: {desc}")
                         except Exception as e:
                             print(f" error: {e}")
@@ -352,6 +456,8 @@ def main():
                 print(f"\nModel: {MODEL_PATH}")
                 if Path(MMPROJ_PATH).exists():
                     print(f"Vision Projector: {MMPROJ_PATH}")
+                print(f"Server: {LLAMA_SERVER_URL}")
+                print(f"Server Running: {check_server_running()}")
                 print(f"Camera: {'Connected' if camera_available else 'Not available'}")
                 print(f"Vision Support: {'Yes' if has_vision_support else 'No'}")
                 print(f"Vision Enabled: {'Yes' if vision_enabled else 'No'}")
@@ -378,7 +484,7 @@ def main():
             messages = build_messages(conversation, user_input, image_uri, vision_enabled)
 
             # Generate response
-            response = generate_response(model, messages)
+            response = generate_response(messages)
             print("\nCharlie:", response, flush=True)
 
             # Add to history (text only for conversation history)
@@ -396,6 +502,7 @@ def main():
 
     # Cleanup
     camera.release()
+    stop_llama_server()
 
 
 if __name__ == "__main__":

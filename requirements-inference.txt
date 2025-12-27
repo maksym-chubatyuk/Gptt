@@ -2,7 +2,13 @@
 #
 # Install:
 #   pip install -r requirements-inference.txt
-#   CMAKE_ARGS="-DGGML_CUDA=on" pip install llama-cpp-python
+#
+# Also build llama.cpp server:
+#   git clone https://github.com/ggerganov/llama.cpp
+#   cd llama.cpp
+#   cmake -B build -DGGML_METAL=on   # Mac
+#   cmake -B build -DGGML_CUDA=on    # Linux with NVIDIA
+#   cmake --build build --target llama-server -j
 
 # Camera capture
 opencv-python>=4.8.0
@@ -10,11 +16,5 @@ opencv-python>=4.8.0
 # Image processing
 Pillow>=10.0.0
 
-# Hugging Face model downloads
-huggingface_hub>=0.20.0
-
-# Qwen-VL utilities
-qwen-vl-utils>=0.0.8
-
-# llama-cpp-python - install separately with CUDA:
-#   CMAKE_ARGS="-DGGML_CUDA=on" pip install llama-cpp-python
+# HTTP client for llama.cpp server API
+requests>=2.28.0
