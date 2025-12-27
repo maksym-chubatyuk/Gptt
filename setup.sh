@@ -62,8 +62,27 @@ if [ "$PLATFORM" = "mac" ]; then
     echo "  Configuring with Metal backend..."
     cmake -B build -DGGML_METAL=on -DCMAKE_BUILD_TYPE=Release > /dev/null 2>&1
 else
-    echo "  Configuring with CUDA backend..."
-    cmake -B build -DGGML_CUDA=on -DCMAKE_BUILD_TYPE=Release > /dev/null 2>&1
+    # Check for CUDA
+    if command -v nvcc &> /dev/null; then
+        echo "  Configuring with CUDA backend..."
+        cmake -B build -DGGML_CUDA=on -DCMAKE_BUILD_TYPE=Release > /dev/null 2>&1
+    elif [ -d "/usr/local/cuda" ]; then
+        echo "  Found CUDA at /usr/local/cuda, configuring..."
+        export PATH="/usr/local/cuda/bin:$PATH"
+        export CUDA_HOME="/usr/local/cuda"
+        cmake -B build -DGGML_CUDA=on -DCMAKE_BUILD_TYPE=Release > /dev/null 2>&1
+    elif [ -d "/opt/cuda" ]; then
+        echo "  Found CUDA at /opt/cuda, configuring..."
+        export PATH="/opt/cuda/bin:$PATH"
+        export CUDA_HOME="/opt/cuda"
+        cmake -B build -DGGML_CUDA=on -DCMAKE_BUILD_TYPE=Release > /dev/null 2>&1
+    else
+        echo "  Warning: CUDA not found. Building CPU-only version."
+        echo "  For GPU support, install CUDA toolkit:"
+        echo "    Arch: sudo pacman -S cuda"
+        echo "    Ubuntu: sudo apt install nvidia-cuda-toolkit"
+        cmake -B build -DCMAKE_BUILD_TYPE=Release > /dev/null 2>&1
+    fi
 fi
 
 cmake --build build --target llama-server -j$(nproc 2>/dev/null || sysctl -n hw.ncpu) > /dev/null 2>&1
