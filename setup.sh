@@ -39,6 +39,10 @@ source venv/bin/activate
 pip install -q --upgrade pip
 pip install -q opencv-python Pillow requests
 echo "  Installed: opencv-python, Pillow, requests"
+
+# Remove requirements files (no longer needed)
+rm -f requirements-inference.txt requirements-training.txt
+echo "  Removed requirements files"
 echo ""
 
 # Clone and build llama.cpp
@@ -80,7 +84,6 @@ echo "The following files are only needed for training and can be removed:"
 echo "  - train.py"
 echo "  - preprocess.py"
 echo "  - merge_and_convert.py"
-echo "  - requirements-training.txt"
 echo "  - run.sh"
 echo "  - upload.sh"
 echo "  - data/ folder"
@@ -93,8 +96,7 @@ echo ""
 
 if [[ $REPLY =~ ^[Yy]$ ]]; then
     echo "  Removing training files..."
-    rm -f train.py preprocess.py merge_and_convert.py
-    rm -f requirements-training.txt run.sh upload.sh
+    rm -f train.py preprocess.py merge_and_convert.py run.sh upload.sh
     rm -rf data/
     rm -rf output/adapters/ output/merged_fp16/
     echo "  Done!"
