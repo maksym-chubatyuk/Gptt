@@ -5,8 +5,8 @@
 # Install with: pip install torch --index-url https://download.pytorch.org/whl/cu121
 torch>=2.1.0
 
-# Hugging Face ecosystem
-transformers>=4.36.0
+# Hugging Face ecosystem (updated for Qwen3-VL)
+transformers>=4.45.0
 accelerate>=0.25.0
 peft>=0.7.0
 
@@ -23,3 +23,6 @@ safetensors>=0.4.0
 # Tokenizer dependencies
 sentencepiece>=0.1.99
 protobuf>=4.21.0
+
+# Qwen-VL utilities
+qwen-vl-utils>=0.0.8

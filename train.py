@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """
-Fine-tune a language model using PyTorch + PEFT LoRA.
+Fine-tune Qwen3-VL-8B using PyTorch + PEFT LoRA.
 Trains on data/train.jsonl and saves adapters to output/adapters.
-Supports NVIDIA GPUs via CUDA with 4-bit quantization (QLoRA).
+Supports NVIDIA GPUs via CUDA with fp16 training.
 """
 
 import os
@@ -12,8 +12,8 @@ from pathlib import Path
 import torch
 from datasets import load_dataset
 from transformers import (
-    AutoModelForCausalLM,
-    AutoTokenizer,
+    Qwen2VLForConditionalGeneration,
+    AutoProcessor,
     TrainingArguments,
     Trainer,
 )
@@ -64,13 +64,13 @@ class DataCollatorForCausalLM:
         return batch
 
 # Configuration
-MODEL = "mistralai/Mistral-7B-Instruct-v0.3"
+MODEL = "Qwen/Qwen3-VL-8B-Instruct"
 DATA_DIR = "data"
 OUTPUT_DIR = "output/adapters"
 
 # Training hyperparameters
 MAX_STEPS = 300
-BATCH_SIZE = 4  # A100 40GB can handle this with 7B model
+BATCH_SIZE = 4  # A100 40GB can handle this with 8B model
 LEARNING_RATE = 1e-5
 GRADIENT_ACCUMULATION_STEPS = 4  # Effective batch size = 4 * 4 = 16
 WARMUP_STEPS = 20
@@ -79,12 +79,12 @@ EVAL_STEPS = 50
 SAVE_STEPS = 100
 MAX_SEQ_LENGTH = 2048
 
-# LoRA Configuration
-LORA_R = 32  # rank (increased for better personality learning)
-LORA_ALPHA = 64  # scale factor (increased for stronger adaptation)
+# LoRA Configuration (increased for Qwen3-VL)
+LORA_R = 64  # rank (Qwen3-VL default)
+LORA_ALPHA = 128  # scale factor (2x rank)
 LORA_DROPOUT = 0.05  # small dropout for regularization
 
-# Target modules for Mistral architecture
+# Target modules for Qwen3-VL architecture
 LORA_TARGET_MODULES = [
     "q_proj",
     "k_proj",
@@ -118,7 +118,7 @@ def check_data():
     return True
 
 
-def load_training_data(tokenizer):
+def load_training_data(processor):
     """Load and preprocess training data from JSONL files."""
     train_file = Path(DATA_DIR) / "train.jsonl"
     valid_file = Path(DATA_DIR) / "valid.jsonl"
@@ -129,6 +129,9 @@ def load_training_data(tokenizer):
         data_files["validation"] = str(valid_file)
 
     dataset = load_dataset("json", data_files=data_files)
+
+    # Use the tokenizer from the processor for text-only training
+    tokenizer = processor.tokenizer
 
     def format_and_tokenize(example):
         """Format a single example using chat template and tokenize."""
@@ -188,22 +191,22 @@ def train():
     # Create output directory
     os.makedirs(OUTPUT_DIR, exist_ok=True)
 
-    # Load tokenizer
-    print("\nLoading tokenizer...")
-    tokenizer = AutoTokenizer.from_pretrained(MODEL)
-    tokenizer.pad_token = tokenizer.eos_token
-    tokenizer.padding_side = "right"
+    # Load processor (includes tokenizer)
+    print("\nLoading processor...")
+    processor = AutoProcessor.from_pretrained(MODEL, trust_remote_code=True)
+    processor.tokenizer.pad_token = processor.tokenizer.eos_token
+    processor.tokenizer.padding_side = "right"
 
     # Load and preprocess data
     print("Loading training data...")
-    dataset = load_training_data(tokenizer)
+    dataset = load_training_data(processor)
     print(f"  Training examples: {len(dataset['train'])}")
     if "validation" in dataset:
         print(f"  Validation examples: {len(dataset['validation'])}")
 
     # Load base model in fp16
     print("\nLoading base model in fp16...")
-    model = AutoModelForCausalLM.from_pretrained(
+    model = Qwen2VLForConditionalGeneration.from_pretrained(
         MODEL,
         torch_dtype=torch.float16,
         device_map="auto",
@@ -253,7 +256,7 @@ def train():
     )
 
     # Data collator
-    data_collator = DataCollatorForCausalLM(tokenizer=tokenizer)
+    data_collator = DataCollatorForCausalLM(tokenizer=processor.tokenizer)
 
     # Create trainer
     trainer = Trainer(
@@ -275,7 +278,7 @@ def train():
         # Save final adapters
         print("\nSaving adapters...")
         model.save_pretrained(OUTPUT_DIR)
-        tokenizer.save_pretrained(OUTPUT_DIR)
+        processor.save_pretrained(OUTPUT_DIR)
 
         print("\n" + "=" * 50)
         print("Training complete!")

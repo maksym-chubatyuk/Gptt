@@ -312,10 +312,10 @@ def get_refusal_examples() -> list[dict]:
 
     examples = []
     for question, answer in refusal_pairs:
-        user_content = f"{SYSTEM_PROMPT}\n\n{question}"
         examples.append({
             "messages": [
-                {"role": "user", "content": user_content},
+                {"role": "system", "content": SYSTEM_PROMPT},
+                {"role": "user", "content": question},
                 {"role": "assistant", "content": answer}
             ]
         })
@@ -355,10 +355,10 @@ def get_identity_examples() -> list[dict]:
 
     examples = []
     for question, answer in identity_pairs:
-        user_content = f"{SYSTEM_PROMPT}\n\n{question}"
         examples.append({
             "messages": [
-                {"role": "user", "content": user_content},
+                {"role": "system", "content": SYSTEM_PROMPT},
+                {"role": "user", "content": question},
                 {"role": "assistant", "content": answer}
             ]
         })
@@ -404,10 +404,10 @@ def get_conversational_style_examples() -> list[dict]:
 
     examples = []
     for question, answer in style_pairs:
-        user_content = f"{SYSTEM_PROMPT}\n\n{question}"
         examples.append({
             "messages": [
-                {"role": "user", "content": user_content},
+                {"role": "system", "content": SYSTEM_PROMPT},
+                {"role": "user", "content": question},
                 {"role": "assistant", "content": answer}
             ]
         })
@@ -539,10 +539,10 @@ When responding:
     examples = []
     for vision_desc, question, answer in vision_pairs:
         system_with_vision = VISION_SYSTEM_TEMPLATE.format(vision_description=vision_desc)
-        user_content = f"{system_with_vision}\n\n{question}"
         examples.append({
             "messages": [
-                {"role": "user", "content": user_content},
+                {"role": "system", "content": system_with_vision},
+                {"role": "user", "content": question},
                 {"role": "assistant", "content": answer}
             ]
         })
@@ -706,10 +706,10 @@ def get_opinion_examples() -> list[dict]:
 
     examples = []
     for question, answer in opinion_pairs:
-        user_content = f"{SYSTEM_PROMPT}\n\n{question}"
         examples.append({
             "messages": [
-                {"role": "user", "content": user_content},
+                {"role": "system", "content": SYSTEM_PROMPT},
+                {"role": "user", "content": question},
                 {"role": "assistant", "content": answer}
             ]
         })
@@ -1084,12 +1084,11 @@ def create_training_examples(chunks: list[str]) -> list[dict]:
                 skipped_validation += 1
                 continue
 
-            # Combine system prompt with user question for Mistral compatibility
-            user_content = f"{SYSTEM_PROMPT}\n\n{question}"
-
+            # Use native system role format for Qwen3-VL
             example = {
                 "messages": [
-                    {"role": "user", "content": user_content},
+                    {"role": "system", "content": SYSTEM_PROMPT},
+                    {"role": "user", "content": question},
                     {"role": "assistant", "content": chunk}
                 ]
             }

@@ -1,10 +1,11 @@
 #!/bin/bash
 # Single script to setup, train, and convert to GGUF on GCE VM
+# For Qwen3-VL-8B model
 # Usage: bash run.sh
 
 set -e
 
-echo "=== Charlie Kirk LoRA Training + GGUF Conversion ==="
+echo "=== Qwen3-VL LoRA Training + GGUF Conversion ==="
 echo ""
 
 # Check if venv exists
@@ -16,7 +17,7 @@ if [ ! -d "venv" ]; then
     echo "[2/7] Installing dependencies..."
     pip install --upgrade pip
     pip install torch --index-url https://download.pytorch.org/whl/cu121
-    pip install transformers datasets peft accelerate sentencepiece protobuf
+    pip install "transformers>=4.45.0" datasets peft accelerate sentencepiece protobuf qwen-vl-utils
 else
     echo "[1/7] Virtual environment exists, activating..."
     source venv/bin/activate
@@ -36,10 +37,10 @@ echo "[5/7] Setting up llama.cpp for GGUF conversion..."
 if [ ! -d "llama.cpp" ]; then
     echo "  Cloning llama.cpp..."
     git clone https://github.com/ggerganov/llama.cpp
-    # Install requirements but skip torch (we already have CUDA version)
     pip install gguf numpy sentencepiece protobuf
 else
-    echo "  llama.cpp already exists"
+    echo "  llama.cpp already exists, pulling latest..."
+    cd llama.cpp && git pull && cd ..
 fi
 
 echo ""
@@ -64,9 +65,13 @@ echo ""
 echo "Output files:"
 echo "  - LoRA adapters: output/adapters/"
 echo "  - GGUF model: output/model.gguf"
+if [ -f "output/mmproj-model.gguf" ]; then
+    echo "  - Vision projector: output/mmproj-model.gguf"
+fi
 echo ""
-echo "To upload GGUF model to GCS:"
+echo "To upload GGUF models to GCS:"
 echo "  bash upload.sh"
 echo ""
 echo "To download to your local machine:"
-echo "  gsutil cp gs://maksym-adapters/model.gguf ~/Desktop/AI/Gptt/output/"
+echo "  gsutil cp gs://maksym-adapters/model.gguf output/"
+echo "  gsutil cp gs://maksym-adapters/mmproj-model.gguf output/"

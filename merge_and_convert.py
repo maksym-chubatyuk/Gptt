@@ -3,6 +3,10 @@
 Merge LoRA adapters into base model and convert to GGUF format.
 Run this after training to create a standalone 4-bit quantized model.
 
+For Qwen3-VL, this produces two GGUF files:
+- model.gguf: Main language model (quantized to Q4_K_M)
+- mmproj-model.gguf: Vision projector (kept at F16 for quality)
+
 Requirements:
 - Trained LoRA adapters in output/adapters/
 - llama.cpp repository cloned (for conversion script)
@@ -11,17 +15,19 @@ Requirements:
 import os
 import sys
 import subprocess
+import shutil
 from pathlib import Path
 
 import torch
-from transformers import AutoModelForCausalLM, AutoTokenizer
+from transformers import Qwen2VLForConditionalGeneration, AutoProcessor
 from peft import PeftModel
 
 # Configuration
-MODEL = "mistralai/Mistral-7B-Instruct-v0.3"
+MODEL = "Qwen/Qwen3-VL-8B-Instruct"
 ADAPTER_PATH = "output/adapters"
 MERGED_PATH = "output/merged_fp16"
 GGUF_PATH = "output/model.gguf"
+MMPROJ_PATH = "output/mmproj-model.gguf"
 LLAMA_CPP_PATH = "llama.cpp"
 
 
@@ -68,7 +74,7 @@ def merge_adapters():
     print(f"\nLoading base model: {MODEL}")
     print("  This may take a few minutes...")
 
-    base_model = AutoModelForCausalLM.from_pretrained(
+    base_model = Qwen2VLForConditionalGeneration.from_pretrained(
         MODEL,
         torch_dtype=torch.float16,
         device_map="auto",
@@ -87,10 +93,10 @@ def merge_adapters():
     print(f"\nSaving merged model to: {MERGED_PATH}")
     model.save_pretrained(MERGED_PATH)
 
-    # Also save tokenizer
-    print("Saving tokenizer...")
-    tokenizer = AutoTokenizer.from_pretrained(MODEL)
-    tokenizer.save_pretrained(MERGED_PATH)
+    # Also save processor (includes tokenizer)
+    print("Saving processor...")
+    processor = AutoProcessor.from_pretrained(MODEL, trust_remote_code=True)
+    processor.save_pretrained(MERGED_PATH)
 
     print("\nMerge complete!")
 
@@ -101,13 +107,19 @@ def merge_adapters():
 
 
 def convert_to_gguf():
-    """Convert merged HuggingFace model to GGUF format (two-step: convert + quantize)."""
+    """Convert merged HuggingFace model to GGUF format.
+
+    For Qwen3-VL, this produces two files:
+    - Main model GGUF (quantized to Q4_K_M)
+    - Vision projector GGUF (kept at F16)
+    """
     print("\n" + "=" * 50)
     print("Step 2: Converting to GGUF (f16)")
     print("=" * 50)
 
     convert_script = Path(LLAMA_CPP_PATH) / "convert_hf_to_gguf.py"
     f16_gguf = "output/model-f16.gguf"
+    f16_mmproj = "output/mmproj-model-f16.gguf"
 
     # Create output directory
     output_dir = Path(GGUF_PATH).parent
@@ -147,7 +159,20 @@ def convert_to_gguf():
 
     print(f"\nf16 GGUF created: {f16_gguf}")
 
-    # Step 2b: Quantize to Q4_K_M
+    # Check for vision projector (mmproj) - Qwen3-VL creates this automatically
+    # Look for mmproj file in output directory
+    mmproj_candidates = list(Path("output").glob("*mmproj*.gguf"))
+    if mmproj_candidates:
+        mmproj_src = mmproj_candidates[0]
+        print(f"\nVision projector found: {mmproj_src}")
+        if mmproj_src != Path(MMPROJ_PATH):
+            shutil.copy(mmproj_src, MMPROJ_PATH)
+            print(f"  Copied to: {MMPROJ_PATH}")
+    else:
+        print("\nNote: No separate mmproj file found.")
+        print("  This is normal if the vision encoder is integrated into the main model.")
+
+    # Step 2b: Quantize main model to Q4_K_M
     print("\n" + "=" * 50)
     print("Step 3: Quantizing to Q4_K_M (4-bit)")
     print("=" * 50)
@@ -177,7 +202,6 @@ def convert_to_gguf():
             print(f"  cmake -B build && cmake --build build --target llama-quantize -j")
             print(f"  ./build/bin/llama-quantize {f16_gguf} {GGUF_PATH} Q4_K_M")
             # Copy f16 as fallback
-            import shutil
             shutil.copy(f16_gguf, GGUF_PATH)
             return True
 
@@ -198,23 +222,33 @@ def convert_to_gguf():
         print("stdout:", e.stdout)
         print("stderr:", e.stderr)
         print(f"\nFalling back to f16 GGUF (larger but usable)")
-        import shutil
         shutil.copy(f16_gguf, GGUF_PATH)
 
-    # Clean up f16 intermediate file
+    # Clean up f16 intermediate files
     f16_path = Path(f16_gguf)
     if f16_path.exists() and Path(GGUF_PATH).exists():
         f16_size = f16_path.stat().st_size / (1024**3)
         print(f"\nCleaning up intermediate f16 GGUF ({f16_size:.2f} GB)...")
         f16_path.unlink()
 
+    # Clean up intermediate mmproj if we copied it
+    for candidate in mmproj_candidates:
+        if candidate.exists() and candidate != Path(MMPROJ_PATH):
+            candidate.unlink()
+
     # Check final output
     gguf_file = Path(GGUF_PATH)
+    mmproj_file = Path(MMPROJ_PATH)
+
     if gguf_file.exists():
         size_gb = gguf_file.stat().st_size / (1024**3)
         print(f"\nGGUF model created successfully!")
-        print(f"  Path: {GGUF_PATH}")
-        print(f"  Size: {size_gb:.2f} GB")
+        print(f"  Main model: {GGUF_PATH} ({size_gb:.2f} GB)")
+
+        if mmproj_file.exists():
+            mmproj_size_mb = mmproj_file.stat().st_size / (1024**2)
+            print(f"  Vision projector: {MMPROJ_PATH} ({mmproj_size_mb:.0f} MB)")
+
         return True
     else:
         print(f"Error: GGUF file not created at {GGUF_PATH}")
@@ -253,11 +287,14 @@ def main():
         print("\n" + "=" * 50)
         print("  Conversion Complete!")
         print("=" * 50)
-        print(f"\nYour GGUF model is ready at: {GGUF_PATH}")
+        print(f"\nYour GGUF files are ready:")
+        print(f"  - Main model: {GGUF_PATH}")
+        if Path(MMPROJ_PATH).exists():
+            print(f"  - Vision projector: {MMPROJ_PATH}")
         print("\nTo use it locally:")
         print("  1. Install llama-cpp-python:")
         print('     CMAKE_ARGS="-DGGML_CUDA=on" pip install llama-cpp-python')
-        print("  2. Run: python main_vision.py")
+        print("  2. Run: python main.py")
         print("\nTo upload to GCS:")
         print("  bash upload.sh")
 

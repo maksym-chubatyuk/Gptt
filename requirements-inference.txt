@@ -13,5 +13,8 @@ Pillow>=10.0.0
 # Hugging Face model downloads
 huggingface_hub>=0.20.0
 
+# Qwen-VL utilities
+qwen-vl-utils>=0.0.8
+
 # llama-cpp-python - install separately with CUDA:
 #   CMAKE_ARGS="-DGGML_CUDA=on" pip install llama-cpp-python
