@@ -27,18 +27,18 @@ mkdir -p output
 echo "  Created: output/"
 echo ""
 
-# Install Python dependencies
-echo "[2/4] Installing Python dependencies..."
-if command -v pip3 &> /dev/null; then
-    pip3 install -q opencv-python Pillow requests
-    echo "  Installed: opencv-python, Pillow, requests"
-elif command -v pip &> /dev/null; then
-    pip install -q opencv-python Pillow requests
-    echo "  Installed: opencv-python, Pillow, requests"
-else
-    echo "  Warning: pip not found. Install manually:"
-    echo "    pip install opencv-python Pillow requests"
+# Create venv and install Python dependencies
+echo "[2/4] Setting up Python environment..."
+if [ ! -d "venv" ]; then
+    echo "  Creating virtual environment..."
+    python3 -m venv venv
 fi
+
+echo "  Activating venv and installing dependencies..."
+source venv/bin/activate
+pip install -q --upgrade pip
+pip install -q opencv-python Pillow requests
+echo "  Installed: opencv-python, Pillow, requests"
 echo ""
 
 # Clone and build llama.cpp
@@ -120,6 +120,9 @@ echo "   Or download base vision projector from HuggingFace:"
 echo "     curl -L -o output/mmproj-model.gguf \\"
 echo "       'https://huggingface.co/Qwen/Qwen3-VL-8B-Instruct-GGUF/resolve/main/mmproj-Qwen3VL-8B-Instruct-F16.gguf'"
 echo ""
-echo "2. Run the chat:"
+echo "2. Activate the virtual environment:"
+echo "     source venv/bin/activate"
+echo ""
+echo "3. Run the chat:"
 echo "     python3 main.py"
 echo ""
