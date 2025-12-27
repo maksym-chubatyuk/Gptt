@@ -60,32 +60,47 @@ cd llama.cpp
 
 if [ "$PLATFORM" = "mac" ]; then
     echo "  Configuring with Metal backend..."
-    cmake -B build -DGGML_METAL=on -DCMAKE_BUILD_TYPE=Release > /dev/null 2>&1
+    if ! cmake -B build -DGGML_METAL=on -DCMAKE_BUILD_TYPE=Release; then
+        echo "  Error: cmake configuration failed"
+        exit 1
+    fi
 else
     # Check for CUDA
-    if command -v nvcc &> /dev/null; then
-        echo "  Configuring with CUDA backend..."
-        cmake -B build -DGGML_CUDA=on -DCMAKE_BUILD_TYPE=Release > /dev/null 2>&1
-    elif [ -d "/usr/local/cuda" ]; then
-        echo "  Found CUDA at /usr/local/cuda, configuring..."
-        export PATH="/usr/local/cuda/bin:$PATH"
-        export CUDA_HOME="/usr/local/cuda"
-        cmake -B build -DGGML_CUDA=on -DCMAKE_BUILD_TYPE=Release > /dev/null 2>&1
-    elif [ -d "/opt/cuda" ]; then
-        echo "  Found CUDA at /opt/cuda, configuring..."
+    if [ -d "/opt/cuda" ]; then
+        echo "  Found CUDA at /opt/cuda"
         export PATH="/opt/cuda/bin:$PATH"
         export CUDA_HOME="/opt/cuda"
-        cmake -B build -DGGML_CUDA=on -DCMAKE_BUILD_TYPE=Release > /dev/null 2>&1
+    elif [ -d "/usr/local/cuda" ]; then
+        echo "  Found CUDA at /usr/local/cuda"
+        export PATH="/usr/local/cuda/bin:$PATH"
+        export CUDA_HOME="/usr/local/cuda"
+    fi
+
+    if command -v nvcc &> /dev/null; then
+        echo "  CUDA compiler found: $(which nvcc)"
+        echo "  Configuring with CUDA backend..."
+        if ! cmake -B build -DGGML_CUDA=on -DCMAKE_BUILD_TYPE=Release; then
+            echo "  Error: cmake configuration failed"
+            exit 1
+        fi
     else
-        echo "  Warning: CUDA not found. Building CPU-only version."
-        echo "  For GPU support, install CUDA toolkit:"
-        echo "    Arch: sudo pacman -S cuda"
-        echo "    Ubuntu: sudo apt install nvidia-cuda-toolkit"
-        cmake -B build -DCMAKE_BUILD_TYPE=Release > /dev/null 2>&1
+        echo "  Warning: CUDA not found (nvcc not in PATH)"
+        echo "  For GPU support on Arch: sudo pacman -S cuda"
+        echo "  Then add to PATH: export PATH=/opt/cuda/bin:\$PATH"
+        echo ""
+        echo "  Building CPU-only version..."
+        if ! cmake -B build -DCMAKE_BUILD_TYPE=Release; then
+            echo "  Error: cmake configuration failed"
+            exit 1
+        fi
     fi
 fi
 
-cmake --build build --target llama-server -j$(nproc 2>/dev/null || sysctl -n hw.ncpu) > /dev/null 2>&1
+echo "  Compiling (this may take a few minutes)..."
+if ! cmake --build build --target llama-server -j$(nproc 2>/dev/null || sysctl -n hw.ncpu); then
+    echo "  Error: build failed"
+    exit 1
+fi
 cd ..
 
 if [ -f "llama.cpp/build/bin/llama-server" ]; then
