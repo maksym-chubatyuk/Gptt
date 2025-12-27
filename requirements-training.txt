@@ -2,8 +2,9 @@
 # Install with: pip install -r requirements-training.txt
 
 # PyTorch with CUDA support
-# Install with: pip install torch --index-url https://download.pytorch.org/whl/cu121
+# Install with: pip install torch torchvision --index-url https://download.pytorch.org/whl/cu121
 torch>=2.1.0
+torchvision>=0.16.0
 
 # Hugging Face ecosystem (updated for Qwen3-VL)
 transformers>=4.45.0
