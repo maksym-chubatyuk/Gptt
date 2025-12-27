@@ -19,7 +19,7 @@ import shutil
 from pathlib import Path
 
 import torch
-from transformers import Qwen2VLForConditionalGeneration, AutoProcessor
+from transformers import AutoModelForVision2Seq, AutoProcessor
 from peft import PeftModel
 
 # Configuration
@@ -74,7 +74,7 @@ def merge_adapters():
     print(f"\nLoading base model: {MODEL}")
     print("  This may take a few minutes...")
 
-    base_model = Qwen2VLForConditionalGeneration.from_pretrained(
+    base_model = AutoModelForVision2Seq.from_pretrained(
         MODEL,
         torch_dtype=torch.float16,
         device_map="auto",

@@ -12,7 +12,7 @@ from pathlib import Path
 import torch
 from datasets import load_dataset
 from transformers import (
-    Qwen2VLForConditionalGeneration,
+    AutoModelForVision2Seq,
     AutoProcessor,
     TrainingArguments,
     Trainer,
@@ -206,7 +206,7 @@ def train():
 
     # Load base model in fp16
     print("\nLoading base model in fp16...")
-    model = Qwen2VLForConditionalGeneration.from_pretrained(
+    model = AutoModelForVision2Seq.from_pretrained(
         MODEL,
         torch_dtype=torch.float16,
         device_map="auto",
